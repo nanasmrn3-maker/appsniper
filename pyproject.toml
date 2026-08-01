@@ -1,0 +1,12 @@
+[project]
+name = "appsniper"
+version = "0.1.0"
+dependencies = [
+    "flet",
+    "google-genai",
+    "ccxt",
+    "Pillow"
+]
+
+[tool.flet]
+module = "main"
