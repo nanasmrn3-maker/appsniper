@@ -5,7 +5,8 @@ dependencies = [
     "flet",
     "google-genai",
     "ccxt",
-    "Pillow"
+    "Pillow",
+    "openpyxl"
 ]
 
 [tool.flet]
