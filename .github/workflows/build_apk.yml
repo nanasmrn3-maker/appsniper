@@ -42,4 +42,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SniperBot-APK
-          path: build/**/*.apk
+          path: |
+            build/apk/*.apk
+            dist/*.apk
+            build/android/apk/*.apk
+            **/*.apk
