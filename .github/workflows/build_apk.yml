@@ -9,6 +9,9 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      CI: true
+      PYTHONUNBUFFERED: 1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,10 +44,8 @@ jobs:
           pip install flet google-genai google-generativeai ccxt Pillow openpyxl
 
       - name: Build Android APK
-        env:
-          CI: true
         run: |
-          flet build apk src --no-interactive --arch arm64-v8a
+          flet build apk src --arch arm64-v8a --verbose
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
