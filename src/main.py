@@ -1,5 +1,5 @@
 import flet as ft
-from google import genai
+import google.generativeai as genai
 import ccxt
 import json
 import os
@@ -71,7 +71,10 @@ async def main(page: ft.Page):
         page.update()
 
         try:
-            client = genai.Client(api_key=api_ai.value)
+            # DIGANTI: Penggunaan SDK pure-python google-generativeai
+            genai.configure(api_key=api_ai.value)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+
             exchange = ccxt.binance({
                 'apiKey': api_bin.value, 
                 'secret': api_sec.value, 
@@ -83,9 +86,11 @@ async def main(page: ft.Page):
             prompt = "Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {'sinyal': 'VALID', 'arah': 'BUY', 'pemicu_masuk': 0.0, 'take_profit': 0.0, 'stop_loss': 0.0}"
             
             loop = asyncio.get_running_loop()
+            
+            # DIGANTI: Memanggil model.generate_content_async() atau melalui executor
             response = await loop.run_in_executor(
                 None, 
-                lambda: client.models.generate_content(model='gemini-2.0-flash', contents=[prompt, img])
+                lambda: model.generate_content([prompt, img])
             )
             
             raw_text = response.text.strip().replace('```json', '').replace('```', '')

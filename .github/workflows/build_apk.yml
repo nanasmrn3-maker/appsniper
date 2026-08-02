@@ -40,11 +40,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install flet
           
-          # Hapus file requirements.txt agar Flet tidak memicu pip internal
-          rm -f src/requirements.txt requirements.txt
+          # Hapus sisa-sisa cache/requirements lama
+          rm -rf src/site-packages src/requirements.txt requirements.txt
           
-          # Bundle library langsung ke folder aplikasi
-          pip install google-genai ccxt pillow openpyxl --target src/
+          # Install SDK Pure Python yang cocok untuk Android
+          pip install google-generativeai ccxt pillow openpyxl --target src/
 
       - name: Build Android APK
         run: |
