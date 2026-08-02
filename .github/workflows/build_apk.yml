@@ -34,6 +34,10 @@ jobs:
         with:
           channel: 'stable'
 
+      - name: Accept Android Licenses
+        run: |
+          yes | flutter doctor --android-licenses || true
+
       - name: Build Android APK
         run: |
           flet build apk src --verbose
