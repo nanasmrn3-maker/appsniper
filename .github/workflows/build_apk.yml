@@ -35,16 +35,16 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Pre-install Dependencies into src/
+      - name: Pre-install Pure Python Dependencies into src/
         run: |
           python -m pip install --upgrade pip
           pip install flet
           
-          # Hapus sisa-sisa cache/requirements lama
+          # Clean old cache and requirements
           rm -rf src/site-packages src/requirements.txt requirements.txt
           
-          # Install SDK Pure Python yang cocok untuk Android
-          pip install google-generativeai ccxt pillow openpyxl --target src/
+          # Install lightweight Pure-Python libraries directly
+          pip install requests ccxt pillow openpyxl --target src/
 
       - name: Build Android APK
         run: |

@@ -1,10 +1,10 @@
 import flet as ft
-import google.generativeai as genai
 import ccxt
 import json
 import os
 import asyncio
-from PIL import Image
+import base64
+import requests
 
 async def main(page: ft.Page):
     page.title = "Sniper Bot Mobile"
@@ -13,7 +13,7 @@ async def main(page: ft.Page):
 
     # 1. Initialize Services
     sp = ft.SharedPreferences()
-    file_picker = ft.FilePicker()  # Initiated directly, NO overlay append required
+    file_picker = ft.FilePicker()
 
     # Load saved preferences
     saved_api_ai = await sp.get("api_ai") or ""
@@ -40,7 +40,7 @@ async def main(page: ft.Page):
     path_foto = ft.Text("Belum ada foto dipilih")
     layar_log = ft.Text("Status: Standby", color=ft.Colors.YELLOW)
 
-    # Clean Async FilePicker Handler
+    # FilePicker Handler
     async def pick_files_click(e):
         files = await file_picker.pick_files()
         if files and len(files) > 0:
@@ -60,6 +60,40 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
+    # Function to Call Gemini REST API directly (No gRPC / No Cython dependencies)
+    def call_gemini_rest_api(api_key, image_path, prompt):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        
+        with open(image_path, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
+
+        # Determine MIME type based on file extension
+        ext = os.path.splitext(image_path)[1].lower()
+        mime_type = "image/png" if ext == ".png" else "image/jpeg"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": encoded_image
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        res = requests.post(url, headers=headers, json=payload, timeout=30)
+        res.raise_for_status()
+        
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+
     # 2. Main Execution Handler
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
@@ -71,10 +105,6 @@ async def main(page: ft.Page):
         page.update()
 
         try:
-            # DIGANTI: Penggunaan SDK pure-python google-generativeai
-            genai.configure(api_key=api_ai.value)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-
             exchange = ccxt.binance({
                 'apiKey': api_bin.value, 
                 'secret': api_sec.value, 
@@ -82,18 +112,17 @@ async def main(page: ft.Page):
                 'options': {'defaultType': 'future'}
             })
             
-            img = Image.open(path_foto.value)
-            prompt = "Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {'sinyal': 'VALID', 'arah': 'BUY', 'pemicu_masuk': 0.0, 'take_profit': 0.0, 'stop_loss': 0.0}"
+            prompt = "Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {\"sinyal\": \"VALID\", \"arah\": \"BUY\", \"pemicu_masuk\": 0.0, \"take_profit\": 0.0, \"stop_loss\": 0.0}"
             
             loop = asyncio.get_running_loop()
             
-            # DIGANTI: Memanggil model.generate_content_async() atau melalui executor
-            response = await loop.run_in_executor(
+            # Call Gemini REST API via Thread
+            raw_response = await loop.run_in_executor(
                 None, 
-                lambda: model.generate_content([prompt, img])
+                lambda: call_gemini_rest_api(api_ai.value, path_foto.value, prompt)
             )
             
-            raw_text = response.text.strip().replace('```json', '').replace('```', '')
+            raw_text = raw_response.strip().replace('```json', '').replace('```', '')
             start = raw_text.find('{')
             end = raw_text.rfind('}') + 1
             setup = json.loads(raw_text[start:end])
