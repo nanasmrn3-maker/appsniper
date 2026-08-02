@@ -1,5 +1,0 @@
-flet
-google-genai
-ccxt
-Pillow
-openpyxl

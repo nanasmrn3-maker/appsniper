@@ -35,10 +35,13 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Install Dependencies
+      - name: Install Build Tools & Pre-package Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flet google-genai ccxt pillow openpyxl
+          pip install flet
+          
+          # Pre-install dependencies directly into app src folder
+          pip install google-genai ccxt pillow openpyxl --target src/site-packages
 
       - name: Build Android APK
         run: |
