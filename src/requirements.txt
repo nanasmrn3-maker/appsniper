@@ -1,6 +1,5 @@
 flet
 google-genai
-google-generativeai
 ccxt
-Pillow
+pillow
 openpyxl

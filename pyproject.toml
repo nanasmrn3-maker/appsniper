@@ -4,9 +4,8 @@ version = "0.1.0"
 dependencies = [
     "flet",
     "google-genai",
-    "google-generativeai",
     "ccxt",
-    "Pillow",
+    "pillow",
     "openpyxl"
 ]
 
