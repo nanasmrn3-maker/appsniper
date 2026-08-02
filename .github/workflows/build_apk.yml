@@ -35,13 +35,16 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Install Build Tools & Pre-package Dependencies
+      - name: Pre-install Dependencies into src/
         run: |
           python -m pip install --upgrade pip
           pip install flet
           
-          # Pre-install dependencies directly into app src folder
-          pip install google-genai ccxt pillow openpyxl --target src/site-packages
+          # Hapus file requirements.txt agar Flet tidak memicu pip internal
+          rm -f src/requirements.txt requirements.txt
+          
+          # Bundle library langsung ke folder aplikasi
+          pip install google-genai ccxt pillow openpyxl --target src/
 
       - name: Build Android APK
         run: |
