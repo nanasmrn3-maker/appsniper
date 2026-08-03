@@ -1,28 +1,85 @@
 import flet as ft
-import ccxt
 import json
 import os
 import asyncio
 import base64
 import requests
+import hmac
+import hashlib
+import time
 
+# --- HELPER FUNGSIONAL BINANCE REST API (PURE PYTHON) ---
+class BinanceFuturesAPI:
+    def __init__(self, api_key, secret_key):
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.base_url = "https://fapi.binance.com"
+
+    def _generate_signature(self, params):
+        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        return hmac.new(
+            self.secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+    def _headers(self):
+        return {"X-MBX-APIKEY": self.api_key}
+
+    def set_leverage(self, symbol, leverage):
+        url = f"{self.base_url}/fapi/v1/leverage"
+        params = {
+            "symbol": symbol.replace('/', '').upper(),
+            "leverage": int(leverage),
+            "timestamp": int(time.time() * 1000)
+        }
+        params["signature"] = self._generate_signature(params)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+
+    def get_ticker_price(self, symbol):
+        url = f"{self.base_url}/fapi/v1/ticker/price"
+        params = {"symbol": symbol.replace('/', '').upper()}
+        res = requests.get(url, params=params, timeout=10)
+        res.raise_for_status()
+        return float(res.json()["price"])
+
+    def create_order(self, symbol, side, order_type, quantity, stop_price=None, reduce_only=False):
+        url = f"{self.base_url}/fapi/v1/order"
+        params = {
+            "symbol": symbol.replace('/', '').upper(),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": f"{quantity:.3f}",
+            "timestamp": int(time.time() * 1000)
+        }
+        if stop_price:
+            params["stopPrice"] = f"{stop_price}"
+        if reduce_only:
+            params["reduceOnly"] = "true"
+
+        params["signature"] = self._generate_signature(params)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+
+
+# --- APP MAIN FLET ---
 async def main(page: ft.Page):
     page.title = "Sniper Bot Mobile"
     page.theme_mode = ft.ThemeMode.DARK
     page.scroll = ft.ScrollMode.AUTO
 
-    # 1. Initialize Services
     sp = ft.SharedPreferences()
     file_picker = ft.FilePicker()
 
-    # Load saved preferences
     saved_api_ai = await sp.get("api_ai") or ""
     saved_api_bin = await sp.get("api_bin") or ""
     saved_api_sec = await sp.get("api_sec") or ""
     saved_margin = await sp.get("margin") or "2"
     saved_leverage = await sp.get("leverage") or "20"
 
-    # Async function to save local data
     async def save_data(e):
         await sp.set("api_ai", api_ai.value or "")
         await sp.set("api_bin", api_bin.value or "")
@@ -35,19 +92,17 @@ async def main(page: ft.Page):
     api_sec = ft.TextField(label="Binance Secret", password=True, can_reveal_password=True, value=saved_api_sec, on_blur=save_data)
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
     input_lev = ft.TextField(label="Leverage", value=saved_leverage, on_blur=save_data)
-    input_symbol = ft.TextField(label="Simbol (Contoh: BTC/USDT)", value="BTC/USDT")
+    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT)", value="BTCUSDT")
     
     path_foto = ft.Text("Belum ada foto dipilih")
     layar_log = ft.Text("Status: Standby", color=ft.Colors.YELLOW)
 
-    # FilePicker Handler
     async def pick_files_click(e):
         files = await file_picker.pick_files()
         if files and len(files) > 0:
             path_foto.value = files[0].path
             path_foto.update()
 
-    # Pop-up Warning Function
     def tampilkan_peringatan(judul, pesan):
         layar_log.value = f"Status: {judul}"
         layar_log.color = ft.Colors.RED
@@ -60,41 +115,28 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # Function to Call Gemini REST API directly (No gRPC / No Cython dependencies)
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
         with open(image_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        # Determine MIME type based on file extension
         ext = os.path.splitext(image_path)[1].lower()
         mime_type = "image/png" if ext == ".png" else "image/jpeg"
 
         payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": encoded_image
-                            }
-                        }
-                    ]
-                }
-            ]
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": encoded_image}}
+                ]
+            }]
         }
-        
         headers = {"Content-Type": "application/json"}
         res = requests.post(url, headers=headers, json=payload, timeout=30)
         res.raise_for_status()
-        
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
 
-    # 2. Main Execution Handler
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
             tampilkan_peringatan("Foto Belum Dipilih", "Silakan upload foto chart terlebih dahulu sebelum meluncurkan bot.")
@@ -105,21 +147,12 @@ async def main(page: ft.Page):
         page.update()
 
         try:
-            exchange = ccxt.binance({
-                'apiKey': api_bin.value, 
-                'secret': api_sec.value, 
-                'enableRateLimit': True, 
-                'options': {'defaultType': 'future'}
-            })
-            
-            prompt = "Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {\"sinyal\": \"VALID\", \"arah\": \"BUY\", \"pemicu_masuk\": 0.0, \"take_profit\": 0.0, \"stop_loss\": 0.0}"
+            binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
+            prompt = 'Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {"sinyal": "VALID", "arah": "BUY", "pemicu_masuk": 0.0, "take_profit": 0.0, "stop_loss": 0.0}'
             
             loop = asyncio.get_running_loop()
-            
-            # Call Gemini REST API via Thread
             raw_response = await loop.run_in_executor(
-                None, 
-                lambda: call_gemini_rest_api(api_ai.value, path_foto.value, prompt)
+                None, lambda: call_gemini_rest_api(api_ai.value, path_foto.value, prompt)
             )
             
             raw_text = raw_response.strip().replace('```json', '').replace('```', '')
@@ -130,22 +163,23 @@ async def main(page: ft.Page):
             if setup['sinyal'] == "VALID":
                 margin = float(input_margin.value)
                 lev = int(input_lev.value)
-                
-                await loop.run_in_executor(None, lambda: exchange.set_leverage(lev, input_symbol.value))
-                ticker = await loop.run_in_executor(None, lambda: exchange.fetch_ticker(input_symbol.value))
-                price = ticker['last']
+                sym = input_symbol.value.strip()
+
+                await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
+                price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
                 size = (margin * lev) / price
                 
-                side_u, side_p = ('buy', 'sell') if setup['arah'] == 'BUY' else ('sell', 'buy')
+                side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
                 
-                await loop.run_in_executor(None, lambda: exchange.create_order(
-                    input_symbol.value, 'STOP_MARKET', side_u, size, setup['pemicu_masuk'], {'stopPrice': setup['pemicu_masuk']}
+                # Triple Shot Execution via REST API
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_u, 'STOP_MARKET', size, stop_price=setup['pemicu_masuk']
                 ))
-                await loop.run_in_executor(None, lambda: exchange.create_order(
-                    input_symbol.value, 'TAKE_PROFIT_MARKET', side_p, size, setup['take_profit'], {'stopPrice': setup['take_profit'], 'reduceOnly': True}
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_p, 'TAKE_PROFIT_MARKET', size, stop_price=setup['take_profit'], reduce_only=True
                 ))
-                await loop.run_in_executor(None, lambda: exchange.create_order(
-                    input_symbol.value, 'STOP_MARKET', side_p, size, setup['stop_loss'], {'stopPrice': setup['stop_loss'], 'reduceOnly': True}
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_p, 'STOP_MARKET', size, stop_price=setup['stop_loss'], reduce_only=True
                 ))
                 
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
@@ -154,19 +188,14 @@ async def main(page: ft.Page):
             else:
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
                 
-        except ccxt.AuthenticationError:
-            tampilkan_peringatan("Gagal Otentikasi", "API Key atau Secret Binance Anda salah, atau izin Futures belum diaktifkan.")
-        except ccxt.InsufficientFunds:
-            tampilkan_peringatan("Saldo Tidak Cukup", "Saldo USDT Futures Anda tidak mencukupi untuk membuka posisi dengan margin tersebut.")
-        except ccxt.NetworkError:
-            tampilkan_peringatan("Gangguan Jaringan", "Gagal terhubung ke server Binance. Periksa kembali koneksi internet Anda.")
+        except requests.exceptions.HTTPError as err:
+            tampilkan_peringatan("Gagal REST API", f"Respon server error: {err.response.text}")
         except Exception as ex:
             tampilkan_peringatan("Terjadi Kesalahan", f"Pesan sistem: {str(ex)}")
 
     def on_luncurkan_click(e):
         asyncio.create_task(luncurkan_execution())
 
-    # 3. Layout UI
     page.add(
         ft.Column([
             ft.Text("PUSAT KOMANDO SNIPER", size=20, weight="bold"),
