@@ -8,7 +8,7 @@ import hmac
 import hashlib
 import time
 
-# --- HELPER FUNGSIONAL BINANCE REST API (PURE PYTHON) ---
+# --- HELPER FUNGSIONAL BINANCE REST API ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key
@@ -45,20 +45,31 @@ class BinanceFuturesAPI:
         res.raise_for_status()
         return float(res.json()["price"])
 
-    def create_order(self, symbol, side, order_type, quantity, stop_price=None, reduce_only=False):
+    def create_stop_market_order(self, symbol, side, stop_price, quantity):
+        url = f"{self.base_url}/fapi/v1/order"
+        params = {
+            "symbol": symbol.replace('/', '').upper(),
+            "side": side.upper(),
+            "type": "STOP_MARKET",
+            "quantity": f"{quantity:.3f}",
+            "stopPrice": f"{stop_price}",
+            "timestamp": int(time.time() * 1000)
+        }
+        params["signature"] = self._generate_signature(params)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+
+    def create_close_order(self, symbol, side, order_type, stop_price):
         url = f"{self.base_url}/fapi/v1/order"
         params = {
             "symbol": symbol.replace('/', '').upper(),
             "side": side.upper(),
             "type": order_type.upper(),
-            "quantity": f"{quantity:.3f}",
+            "stopPrice": f"{stop_price}",
+            "closePosition": "true",
             "timestamp": int(time.time() * 1000)
         }
-        if stop_price:
-            params["stopPrice"] = f"{stop_price}"
-        if reduce_only:
-            params["reduceOnly"] = "true"
-
         params["signature"] = self._generate_signature(params)
         res = requests.post(url, headers=self._headers(), params=params, timeout=10)
         res.raise_for_status()
@@ -77,7 +88,7 @@ async def main(page: ft.Page):
     saved_api_ai = await sp.get("api_ai") or ""
     saved_api_bin = await sp.get("api_bin") or ""
     saved_api_sec = await sp.get("api_sec") or ""
-    saved_margin = await sp.get("margin") or "2"
+    saved_margin = await sp.get("margin") or "10"
     saved_leverage = await sp.get("leverage") or "20"
 
     async def save_data(e):
@@ -104,7 +115,7 @@ async def main(page: ft.Page):
             path_foto.update()
 
     def tampilkan_peringatan(judul, pesan):
-        layar_log.value = f"Status: {judul}"
+        layar_log.value = f"Status: {judul}\n\nDetail: {pesan}"
         layar_log.color = ft.Colors.RED
         
         dialog = ft.AlertDialog(
@@ -171,15 +182,17 @@ async def main(page: ft.Page):
                 
                 side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
                 
-                # Triple Shot Execution via REST API
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_u, 'STOP_MARKET', size, stop_price=setup['pemicu_masuk']
+                # 1. Entry Order
+                await loop.run_in_executor(None, lambda: binance.create_stop_market_order(
+                    sym, side_u, setup['pemicu_masuk'], size
                 ))
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'TAKE_PROFIT_MARKET', size, stop_price=setup['take_profit'], reduce_only=True
+                # 2. Take Profit Order
+                await loop.run_in_executor(None, lambda: binance.create_close_order(
+                    sym, side_p, 'TAKE_PROFIT_MARKET', setup['take_profit']
                 ))
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'STOP_MARKET', size, stop_price=setup['stop_loss'], reduce_only=True
+                # 3. Stop Loss Order
+                await loop.run_in_executor(None, lambda: binance.create_close_order(
+                    sym, side_p, 'STOP_MARKET', setup['stop_loss']
                 ))
                 
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
@@ -189,9 +202,10 @@ async def main(page: ft.Page):
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
                 
         except requests.exceptions.HTTPError as err:
-            tampilkan_peringatan("Gagal REST API", f"Respon server error: {err.response.text}")
+            err_msg = err.response.text if err.response is not None else str(err)
+            tampilkan_peringatan("Gagal REST API", f"{err_msg}")
         except Exception as ex:
-            tampilkan_peringatan("Terjadi Kesalahan", f"Pesan sistem: {str(ex)}")
+            tampilkan_peringatan("Terjadi Kesalahan", f"{str(ex)}")
 
     def on_luncurkan_click(e):
         asyncio.create_task(luncurkan_execution())
