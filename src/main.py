@@ -7,6 +7,10 @@ import requests
 import hmac
 import hashlib
 import time
+import urllib3
+
+# Matikan peringatan SSL insecure agar log tetap bersih
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- HELPER FUNGSIONAL BINANCE REST API ---
 class BinanceFuturesAPI:
@@ -34,14 +38,14 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
         res.raise_for_status()
         return res.json()
 
     def get_ticker_price(self, symbol):
         url = f"{self.base_url}/fapi/v1/ticker/price"
         params = {"symbol": symbol.replace('/', '').upper()}
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, timeout=10, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
@@ -56,7 +60,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -71,7 +75,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -126,7 +130,6 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # DIGANTI: Menggunakan model gemini-2.5-flash
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         with open(image_path, "rb") as image_file:
@@ -144,7 +147,7 @@ async def main(page: ft.Page):
             }]
         }
         headers = {"Content-Type": "application/json"}
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
+        res = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
