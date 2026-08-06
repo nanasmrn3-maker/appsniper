@@ -9,7 +9,7 @@ import hashlib
 import time
 import urllib3
 
-# Matikan peringatan SSL insecure agar log tetap bersih
+# Matikan peringatan SSL insecure agar log tetap bersih di Android
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- HELPER FUNGSIONAL BINANCE REST API ---
@@ -131,7 +131,8 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        # Menggunakan model gemini-2.0-flash yang terbukti valid di API Anda
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
         with open(image_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
@@ -147,7 +148,8 @@ async def main(page: ft.Page):
             }]
         }
         headers = {"Content-Type": "application/json"}
-        res = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
+        # Timeout dinaikkan dan SSL verify dimatikan agar stabil di HP
+        res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
