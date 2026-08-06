@@ -126,8 +126,9 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
+    # DIGANTI: Menggunakan model gemini-2.5-flash
     def call_gemini_rest_api(api_key, image_path, prompt):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         with open(image_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
