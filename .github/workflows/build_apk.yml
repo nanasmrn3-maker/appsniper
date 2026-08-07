@@ -35,16 +35,16 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Pre-install Pure Python Dependencies into src/
+      - name: Pre-install Pure Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install flet
           
-          # Hapus cache dan file requirements lama
+          # Hapus sisa cache dan file requirements lama
           rm -rf src/site-packages src/requirements.txt requirements.txt
           
-          # Install SDK resmi Gemini dan modul ringan ke target src/
-          pip install requests pillow google-generativeai --target src/
+          # Install hanya library pure-Python langsung ke target folder src/
+          pip install requests --target src/
 
       - name: Build Android APK
         run: |
