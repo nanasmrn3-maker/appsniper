@@ -44,7 +44,7 @@ class BinanceFuturesAPI:
     def get_ticker_price(self, symbol):
         url = f"{self.base_url}/fapi/v1/ticker/price"
         params = {"symbol": symbol.replace('/', '').upper()}
-        res = requests.get(url, params=params, timeout=15, verify=False)
+        res = requests.get(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
@@ -153,11 +153,8 @@ async def main(page: ft.Page):
             }]
         }
         
-        # Pengaturan headers dengan Keep-Alive streaming agar koneksi tidak terputus
         headers = {
-            "Content-Type": "application/json",
-            "Accept-Encoding": "gzip, deflate",
-            "User-Agent": "Mozilla/5.0 (Android; Mobile)"
+            "Content-Type": "application/json"
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
@@ -175,7 +172,6 @@ async def main(page: ft.Page):
         page.update()
 
         try:
-            binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
             prompt = 'Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {"sinyal": "VALID", "arah": "BUY", "pemicu_masuk": 0.0, "take_profit": 0.0, "stop_loss": 0.0}'
             
             loop = asyncio.get_running_loop()
@@ -188,10 +184,11 @@ async def main(page: ft.Page):
             end = raw_text.rfind('}') + 1
             setup = json.loads(raw_text[start:end])
 
-            if setup['sinyal'] == "VALID":
+            if setup.get('sinyal') == "VALID":
                 layar_log.value = "Status: Sinyal VALID! Menembak Binance..."
                 page.update()
 
+                binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
                 margin = float(input_margin.value)
                 lev = int(input_lev.value)
                 sym = input_symbol.value.strip()
