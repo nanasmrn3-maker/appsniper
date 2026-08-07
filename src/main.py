@@ -9,7 +9,6 @@ import hashlib
 import time
 import urllib3
 
-# Matikan peringatan SSL insecure agar log tetap bersih di Android
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- HELPER FUNGSIONAL BINANCE REST API ---
@@ -130,14 +129,9 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # ENDPOINT GEMINI V1BETA DENGAN FALLBACK ALIAS MODEL
+    # MENGGUNAKAN ENDPOINT MODEL GEMINI YANG PASTI TERSEDIA
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # Menggunakan alias gemini-1.5-flash-latest atau gemini-2.0-flash yang didukung v1beta REST API
-        models_to_try = [
-            "gemini-1.5-flash-latest",
-            "gemini-2.0-flash",
-            "gemini-1.5-pro-latest"
-        ]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key={api_key}"
         
         with open(image_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
@@ -155,20 +149,15 @@ async def main(page: ft.Page):
         }
         headers = {"Content-Type": "application/json"}
         
-        last_error = None
-        for model in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            try:
-                res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    last_error = res.text
-            except Exception as e:
-                last_error = str(e)
-
-        raise requests.exceptions.HTTPError(f"Gagal memanggil model Gemini: {last_error}")
+        res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
+        if res.status_code != 200:
+            # Fallback ke endpoint default jika gemini-1.5-flash-8b tidak ada
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            res = requests.post(fallback_url, headers=headers, json=payload, timeout=45, verify=False)
+            
+        res.raise_for_status()
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
