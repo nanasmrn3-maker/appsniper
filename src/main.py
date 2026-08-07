@@ -130,10 +130,15 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # MENGGUNAKAN ENDPOINT V1 STABIL DENGAN FALLBACK AUTOMATIS
+    # ENDPOINT GEMINI V1BETA DENGAN FALLBACK ALIAS MODEL
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # Gunakan v1 endpoint resmi yang stabil
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # Menggunakan alias gemini-1.5-flash-latest atau gemini-2.0-flash yang didukung v1beta REST API
+        models_to_try = [
+            "gemini-1.5-flash-latest",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro-latest"
+        ]
+        
         with open(image_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
@@ -149,10 +154,21 @@ async def main(page: ft.Page):
             }]
         }
         headers = {"Content-Type": "application/json"}
-        res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
-        res.raise_for_status()
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        
+        last_error = None
+        for model in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    last_error = res.text
+            except Exception as e:
+                last_error = str(e)
+
+        raise requests.exceptions.HTTPError(f"Gagal memanggil model Gemini: {last_error}")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
@@ -208,7 +224,7 @@ async def main(page: ft.Page):
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
                 
         except requests.exceptions.HTTPError as err:
-            err_msg = err.response.text if err.response is not None else str(err)
+            err_msg = err.response.text if hasattr(err, 'response') and err.response is not None else str(err)
             tampilkan_peringatan("Gagal REST API", f"{err_msg}")
         except Exception as ex:
             tampilkan_peringatan("Terjadi Kesalahan", f"{str(ex)}")
