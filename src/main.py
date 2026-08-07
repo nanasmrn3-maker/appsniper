@@ -9,7 +9,6 @@ import hashlib
 import time
 import urllib3
 
-# Matikan warning SSL agar log tetap bersih
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- HELPER FUNGSIONAL BINANCE REST API ---
@@ -38,14 +37,14 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
     def get_ticker_price(self, symbol):
         url = f"{self.base_url}/fapi/v1/ticker/price"
         params = {"symbol": symbol.replace('/', '').upper()}
-        res = requests.get(url, params=params, timeout=10, verify=False)
+        res = requests.get(url, params=params, timeout=15, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
@@ -60,7 +59,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -75,7 +74,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=10, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -130,13 +129,12 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # PERBAIKAN AKSES GEMINI: Menggunakan Endpoint RESMI gemini-2.5-flash
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         
-        # Baca gambar secara murni (Binary -> Base64) TANPA PIL
         with open(image_path, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
+            raw_bytes = image_file.read()
+            encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
         mime_type = "image/png" if ext == ".png" else "image/jpeg"
@@ -154,9 +152,15 @@ async def main(page: ft.Page):
                 ]
             }]
         }
-        headers = {"Content-Type": "application/json"}
         
-        res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
+        # Pengaturan headers dengan Keep-Alive streaming agar koneksi tidak terputus
+        headers = {
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate",
+            "User-Agent": "Mozilla/5.0 (Android; Mobile)"
+        }
+        
+        res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -166,7 +170,7 @@ async def main(page: ft.Page):
             tampilkan_peringatan("Foto Belum Dipilih", "Silakan upload foto chart terlebih dahulu sebelum meluncurkan bot.")
             return
 
-        layar_log.value = "Status: Menjalankan Misi..."
+        layar_log.value = "Status: Menghubungi Gemini AI..."
         layar_log.color = ft.Colors.BLUE
         page.update()
 
@@ -185,6 +189,9 @@ async def main(page: ft.Page):
             setup = json.loads(raw_text[start:end])
 
             if setup['sinyal'] == "VALID":
+                layar_log.value = "Status: Sinyal VALID! Menembak Binance..."
+                page.update()
+
                 margin = float(input_margin.value)
                 lev = int(input_lev.value)
                 sym = input_symbol.value.strip()
