@@ -40,10 +40,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install flet
           
-          # Hapus sisa cache dan file requirements lama
+          # Hapus cache dan requirements lama yang berpotensi membawa modul biner
           rm -rf src/site-packages src/requirements.txt requirements.txt
           
-          # Install hanya library pure-Python langsung ke target folder src/
+          # Install HANYA library pure Python ke folder src/
           pip install requests --target src/
 
       - name: Build Android APK
