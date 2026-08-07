@@ -35,16 +35,16 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Pre-install Lightweight Pure Python Dependencies
+      - name: Pre-install Pure Python Dependencies into src/
         run: |
           python -m pip install --upgrade pip
           pip install flet
           
-          # Hapus sisa-sisa cache dan requirements lama
+          # Hapus cache dan file requirements lama
           rm -rf src/site-packages src/requirements.txt requirements.txt
           
-          # Install paket pure Python langsung ke folder src/
-          pip install requests pillow openpyxl --target src/
+          # Install SDK resmi Gemini dan modul ringan ke target src/
+          pip install requests pillow google-generativeai --target src/
 
       - name: Build Android APK
         run: |

@@ -2,12 +2,13 @@ import flet as ft
 import json
 import os
 import asyncio
-import base64
 import requests
 import hmac
 import hashlib
 import time
 import urllib3
+from PIL import Image
+import google.generativeai as genai
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -129,35 +130,13 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # MENGGUNAKAN ENDPOINT MODEL GEMINI YANG PASTI TERSEDIA
-    def call_gemini_rest_api(api_key, image_path, prompt):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key={api_key}"
-        
-        with open(image_path, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
-
-        ext = os.path.splitext(image_path)[1].lower()
-        mime_type = "image/png" if ext == ".png" else "image/jpeg"
-
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": mime_type, "data": encoded_image}}
-                ]
-            }]
-        }
-        headers = {"Content-Type": "application/json"}
-        
-        res = requests.post(url, headers=headers, json=payload, timeout=45, verify=False)
-        if res.status_code != 200:
-            # Fallback ke endpoint default jika gemini-1.5-flash-8b tidak ada
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-            res = requests.post(fallback_url, headers=headers, json=payload, timeout=45, verify=False)
-            
-        res.raise_for_status()
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+    # PANGGILAN SDK RESMI GEMINI VIA PIL IMAGE
+    def call_gemini_sdk(api_key, image_path, prompt):
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        img = Image.open(image_path)
+        response = model.generate_content([prompt, img])
+        return response.text
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
@@ -174,7 +153,7 @@ async def main(page: ft.Page):
             
             loop = asyncio.get_running_loop()
             raw_response = await loop.run_in_executor(
-                None, lambda: call_gemini_rest_api(api_ai.value, path_foto.value, prompt)
+                None, lambda: call_gemini_sdk(api_ai.value, path_foto.value, prompt)
             )
             
             raw_text = raw_response.strip().replace('```json', '').replace('```', '')
@@ -212,9 +191,6 @@ async def main(page: ft.Page):
             else:
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
                 
-        except requests.exceptions.HTTPError as err:
-            err_msg = err.response.text if hasattr(err, 'response') and err.response is not None else str(err)
-            tampilkan_peringatan("Gagal REST API", f"{err_msg}")
         except Exception as ex:
             tampilkan_peringatan("Terjadi Kesalahan", f"{str(ex)}")
 
