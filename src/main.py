@@ -131,6 +131,7 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
+        # MENGGUNAKAN NAMA MODEL DENGAN PREFIX models/ SESUAI SPESIFIKASI GOOGLE REST API V1BETA
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         
         with open(image_path, "rb") as image_file:
@@ -145,8 +146,8 @@ async def main(page: ft.Page):
                 "parts": [
                     {"text": prompt},
                     {
-                        "inlineData": {
-                            "mimeType": mime_type,
+                        "inline_data": {
+                            "mime_type": mime_type,
                             "data": encoded_image
                         }
                     }
