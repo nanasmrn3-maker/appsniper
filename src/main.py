@@ -37,7 +37,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), data=params, timeout=15, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -54,12 +54,13 @@ class BinanceFuturesAPI:
             "symbol": symbol.replace('/', '').upper(),
             "side": side.upper(),
             "type": "STOP_MARKET",
+            "timeInForce": "GTC",
             "quantity": f"{round(quantity, 3)}",
             "stopPrice": f"{stop_price}",
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), data=params, timeout=15, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
@@ -74,7 +75,7 @@ class BinanceFuturesAPI:
             "timestamp": int(time.time() * 1000)
         }
         params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), data=params, timeout=15, verify=False)
+        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
         res.raise_for_status()
         return res.json()
 
