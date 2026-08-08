@@ -130,9 +130,13 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
+    # MENGGUNAKAN PILIHAN MODEL DENGAN AUTO-FALLBACK REST API
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # MENGGUNAKAN NAMA MODEL DENGAN PREFIX models/ SESUAI SPESIFIKASI GOOGLE REST API V1BETA
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro"
+        ]
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -155,14 +159,22 @@ async def main(page: ft.Page):
             }]
         }
         
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
-        res.raise_for_status()
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        headers = {"Content-Type": "application/json"}
+        last_exception = None
+
+        for model_name in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    last_exception = res.text
+            except Exception as e:
+                last_exception = str(e)
+
+        raise RuntimeError(f"Semua endpoint Gemini gagal. Detail: {last_exception}")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
