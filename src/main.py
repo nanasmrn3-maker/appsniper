@@ -130,12 +130,12 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # MENGGUNAKAN PILIHAN MODEL DENGAN AUTO-FALLBACK REST API
+    # PILIHAN ENDPOINT MODEREN GEMINI
     def call_gemini_rest_api(api_key, image_path, prompt):
-        models = [
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro"
+        endpoints = [
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
         ]
         
         with open(image_path, "rb") as image_file:
@@ -162,8 +162,7 @@ async def main(page: ft.Page):
         headers = {"Content-Type": "application/json"}
         last_exception = None
 
-        for model_name in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        for url in endpoints:
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
                 if res.status_code == 200:
