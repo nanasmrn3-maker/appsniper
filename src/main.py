@@ -8,11 +8,13 @@ import hmac
 import hashlib
 import time
 import urllib3
+import io
+from PIL import Image
 from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- HELPER FUNGSIONAL BINANCE REST API (EVALUASI CCXT PATTERN) ---
+# --- HELPER FUNGSIONAL BINANCE REST API ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key.strip()
@@ -36,10 +38,7 @@ class BinanceFuturesAPI:
         if params is None:
             params = {}
         
-        # Selalu sertakan timestamp
         params["timestamp"] = int(time.time() * 1000)
-        
-        # Buat query string tersusun persis seperti ccxt
         query_string = urlencode(params)
         signature = self._generate_signature(query_string)
         full_query = f"{query_string}&signature={signature}"
@@ -49,7 +48,6 @@ class BinanceFuturesAPI:
         if method.upper() == "GET":
             res = requests.get(f"{url}?{full_query}", headers=self._headers(), timeout=15, verify=False)
         else:
-            # Gunakan data=full_query untuk form-urlencoded POST request
             res = requests.post(url, headers=self._headers(), data=full_query, timeout=15, verify=False)
             
         res.raise_for_status()
@@ -139,12 +137,13 @@ async def main(page: ft.Page):
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         
-        with open(image_path, "rb") as image_file:
-            raw_bytes = image_file.read()
-            encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
-
-        ext = os.path.splitext(image_path)[1].lower()
-        mime_type = "image/png" if ext == ".png" else "image/jpeg"
+        # Kompresi & Resize Gambar menggunakan Pillow agar payload ringan
+        img = Image.open(image_path)
+        img.thumbnail((800, 800))  # Resize maksimal lebar/tinggi 800px
+        
+        buffer = io.BytesIO()
+        img.convert("RGB").save(buffer, format="JPEG", quality=70)
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         payload = {
             "contents": [{
@@ -152,7 +151,7 @@ async def main(page: ft.Page):
                     {"text": prompt},
                     {
                         "inline_data": {
-                            "mime_type": mime_type,
+                            "mime_type": "image/jpeg",
                             "data": encoded_image
                         }
                     }

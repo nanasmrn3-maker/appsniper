@@ -35,16 +35,12 @@ jobs:
           touch ~/.android/repositories.cfg
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Pre-install Pure Python Dependencies
+      - name: Pre-install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install flet
-          
-          # Hapus cache dan requirements lama yang berpotensi membawa modul biner
           rm -rf src/site-packages src/requirements.txt requirements.txt
-          
-          # Install HANYA library pure Python ke folder src/
-          pip install requests --target src/
+          pip install requests pillow --target src/
 
       - name: Build Android APK
         run: |
