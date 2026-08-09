@@ -8,18 +8,18 @@ import hmac
 import hashlib
 import time
 import urllib3
+from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- HELPER FUNGSIONAL BINANCE REST API ---
+# --- HELPER FUNGSIONAL BINANCE REST API (EVALUASI CCXT PATTERN) ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
-        self.api_key = api_key
-        self.secret_key = secret_key
+        self.api_key = api_key.strip()
+        self.secret_key = secret_key.strip()
         self.base_url = "https://fapi.binance.com"
 
-    def _generate_signature(self, params):
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+    def _generate_signature(self, query_string):
         return hmac.new(
             self.secret_key.encode('utf-8'),
             query_string.encode('utf-8'),
@@ -27,57 +27,63 @@ class BinanceFuturesAPI:
         ).hexdigest()
 
     def _headers(self):
-        return {"X-MBX-APIKEY": self.api_key}
-
-    def set_leverage(self, symbol, leverage):
-        url = f"{self.base_url}/fapi/v1/leverage"
-        params = {
-            "symbol": symbol.replace('/', '').upper(),
-            "leverage": int(leverage),
-            "timestamp": int(time.time() * 1000)
+        return {
+            "X-MBX-APIKEY": self.api_key,
+            "Content-Type": "application/x-www-form-urlencoded"
         }
-        params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
+
+    def _request(self, method, endpoint, params=None):
+        if params is None:
+            params = {}
+        
+        # Selalu sertakan timestamp
+        params["timestamp"] = int(time.time() * 1000)
+        
+        # Buat query string tersusun persis seperti ccxt
+        query_string = urlencode(params)
+        signature = self._generate_signature(query_string)
+        full_query = f"{query_string}&signature={signature}"
+        
+        url = f"{self.base_url}{endpoint}"
+        
+        if method.upper() == "GET":
+            res = requests.get(f"{url}?{full_query}", headers=self._headers(), timeout=15, verify=False)
+        else:
+            # Gunakan data=full_query untuk form-urlencoded POST request
+            res = requests.post(url, headers=self._headers(), data=full_query, timeout=15, verify=False)
+            
         res.raise_for_status()
         return res.json()
+
+    def set_leverage(self, symbol, leverage):
+        params = {
+            "symbol": symbol.replace('/', '').upper(),
+            "leverage": int(leverage)
+        }
+        return self._request("POST", "/fapi/v1/leverage", params)
 
     def get_ticker_price(self, symbol):
         url = f"{self.base_url}/fapi/v1/ticker/price"
         params = {"symbol": symbol.replace('/', '').upper()}
-        res = requests.get(url, headers=self._headers(), params=params, timeout=15, verify=False)
+        res = requests.get(url, params=params, timeout=15, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
-    def create_stop_market_order(self, symbol, side, stop_price, quantity):
-        url = f"{self.base_url}/fapi/v1/order"
-        params = {
-            "symbol": symbol.replace('/', '').upper(),
-            "side": side.upper(),
-            "type": "STOP_MARKET",
-            "timeInForce": "GTC",
-            "quantity": f"{round(quantity, 3)}",
-            "stopPrice": f"{stop_price}",
-            "timestamp": int(time.time() * 1000)
-        }
-        params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
-        res.raise_for_status()
-        return res.json()
-
-    def create_close_order(self, symbol, side, order_type, stop_price):
-        url = f"{self.base_url}/fapi/v1/order"
+    def create_order(self, symbol, side, order_type, quantity, price, stop_price=None, reduce_only=False):
         params = {
             "symbol": symbol.replace('/', '').upper(),
             "side": side.upper(),
             "type": order_type.upper(),
-            "stopPrice": f"{stop_price}",
-            "closePosition": "true",
-            "timestamp": int(time.time() * 1000)
+            "quantity": f"{quantity:.3f}",
         }
-        params["signature"] = self._generate_signature(params)
-        res = requests.post(url, headers=self._headers(), params=params, timeout=15, verify=False)
-        res.raise_for_status()
-        return res.json()
+        
+        if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]:
+            params["stopPrice"] = f"{stop_price}"
+            
+        if reduce_only:
+            params["reduceOnly"] = "true"
+            
+        return self._request("POST", "/fapi/v1/order", params)
 
 
 # --- APP MAIN FLET ---
@@ -107,7 +113,7 @@ async def main(page: ft.Page):
     api_sec = ft.TextField(label="Binance Secret", password=True, can_reveal_password=True, value=saved_api_sec, on_blur=save_data)
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
     input_lev = ft.TextField(label="Leverage", value=saved_leverage, on_blur=save_data)
-    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT)", value="BTCUSDT")
+    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT atau CAP/USDT)", value="BTCUSDT")
     
     path_foto = ft.Text("Belum ada foto dipilih")
     layar_log = ft.Text("Status: Standby", color=ft.Colors.YELLOW)
@@ -130,13 +136,8 @@ async def main(page: ft.Page):
         page.open(dialog)
         page.update()
 
-    # PILIHAN ENDPOINT MODEREN GEMINI
     def call_gemini_rest_api(api_key, image_path, prompt):
-        endpoints = [
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}",
-            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
-        ]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -160,20 +161,10 @@ async def main(page: ft.Page):
         }
         
         headers = {"Content-Type": "application/json"}
-        last_exception = None
-
-        for url in endpoints:
-            try:
-                res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    last_exception = res.text
-            except Exception as e:
-                last_exception = str(e)
-
-        raise RuntimeError(f"Semua endpoint Gemini gagal. Detail: {last_exception}")
+        res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
+        res.raise_for_status()
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
@@ -185,7 +176,21 @@ async def main(page: ft.Page):
         page.update()
 
         try:
-            prompt = 'Berikan HANYA JSON murni (tanpa penjelasan, tanpa markdown) dengan format: {"sinyal": "VALID", "arah": "BUY", "pemicu_masuk": 0.0, "take_profit": 0.0, "stop_loss": 0.0}'
+            prompt = """
+            Anda adalah sistem penembak jitu trading crypto. Analisis chart/gambar ini dengan sangat teliti.
+            Perhatikan struktur harga terbaru yang tertera di chart.
+            Tentukan setup Stop Market (Entri, Take Profit, dan Stop Loss) berdasarkan analisis teknikal chart tersebut.
+            
+            Keluarkan HANYA format JSON murni tanpa kata-kata pembuka/penutup. Format wajib:
+            {
+                "sinyal": "VALID",
+                "arah": "BUY",
+                "pemicu_masuk": 0.00000,
+                "take_profit": 0.00000,
+                "stop_loss": 0.00000
+            }
+            Jika tidak ada momentum atau chart kurang jelas untuk dianalisis, ubah status "sinyal" menjadi "TIDAK VALID".
+            """
             
             loop = asyncio.get_running_loop()
             raw_response = await loop.run_in_executor(
@@ -204,7 +209,7 @@ async def main(page: ft.Page):
                 binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
                 margin = float(input_margin.value)
                 lev = int(input_lev.value)
-                sym = input_symbol.value.strip()
+                sym = input_symbol.value.strip().replace('/', '').upper()
 
                 await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
                 price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
@@ -212,17 +217,17 @@ async def main(page: ft.Page):
                 
                 side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
                 
-                # 1. Entry Order
-                await loop.run_in_executor(None, lambda: binance.create_stop_market_order(
-                    sym, side_u, setup['pemicu_masuk'], size
+                # 1. Order Utama (STOP_MARKET)
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_u, 'STOP_MARKET', size, setup['pemicu_masuk'], stop_price=setup['pemicu_masuk']
                 ))
-                # 2. Take Profit Order
-                await loop.run_in_executor(None, lambda: binance.create_close_order(
-                    sym, side_p, 'TAKE_PROFIT_MARKET', setup['take_profit']
+                # 2. Order Take Profit (TAKE_PROFIT_MARKET)
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_p, 'TAKE_PROFIT_MARKET', size, setup['take_profit'], stop_price=setup['take_profit'], reduce_only=True
                 ))
-                # 3. Stop Loss Order
-                await loop.run_in_executor(None, lambda: binance.create_close_order(
-                    sym, side_p, 'STOP_MARKET', setup['stop_loss']
+                # 3. Order Stop Loss (STOP_MARKET)
+                await loop.run_in_executor(None, lambda: binance.create_order(
+                    sym, side_p, 'STOP_MARKET', size, setup['stop_loss'], stop_price=setup['stop_loss'], reduce_only=True
                 ))
                 
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
