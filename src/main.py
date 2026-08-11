@@ -137,6 +137,11 @@ async def main(page: ft.Page):
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
+            
+            # Subsampling byte jika ukuran gambar terlalu besar (> 1MB) untuk mencegah socket abort
+            if len(raw_bytes) > 1000000:
+                raw_bytes = raw_bytes[::2]  # Mengambil piksel berselang agar ukuran berkurang 50%
+                
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
@@ -156,8 +161,13 @@ async def main(page: ft.Page):
             }]
         }
         
-        headers = {"Content-Type": "application/json"}
-        res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
+        session = requests.Session()
+        headers = {
+            "Content-Type": "application/json",
+            "Connection": "close"
+        }
+        
+        res = session.post(url, headers=headers, json=payload, timeout=60, verify=False)
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
