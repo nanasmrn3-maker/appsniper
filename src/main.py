@@ -8,8 +8,6 @@ import hmac
 import hashlib
 import time
 import urllib3
-import io
-from PIL import Image
 from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -137,13 +135,12 @@ async def main(page: ft.Page):
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         
-        # Kompresi & Resize Gambar menggunakan Pillow agar payload ringan
-        img = Image.open(image_path)
-        img.thumbnail((800, 800))  # Resize maksimal lebar/tinggi 800px
-        
-        buffer = io.BytesIO()
-        img.convert("RGB").save(buffer, format="JPEG", quality=70)
-        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        with open(image_path, "rb") as image_file:
+            raw_bytes = image_file.read()
+            encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
+
+        ext = os.path.splitext(image_path)[1].lower()
+        mime_type = "image/png" if ext == ".png" else "image/jpeg"
 
         payload = {
             "contents": [{
@@ -151,7 +148,7 @@ async def main(page: ft.Page):
                     {"text": prompt},
                     {
                         "inline_data": {
-                            "mime_type": "image/jpeg",
+                            "mime_type": mime_type,
                             "data": encoded_image
                         }
                     }
