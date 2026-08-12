@@ -135,14 +135,9 @@ async def main(page: ft.Page):
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         
+        # BACA BYTES GAMBAR ASLI TANPA POTONGAN AGAR HEADER FILE VALID
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
-            
-            # Subsampling biner otomatis jika ukuran berkas di atas 500 KB agar payload sangat ringan
-            if len(raw_bytes) > 500000:
-                step = len(raw_bytes) // 400000 + 1
-                raw_bytes = raw_bytes[::step]
-                
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
@@ -163,8 +158,7 @@ async def main(page: ft.Page):
         }
         
         headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Android; Mobile)"
+            "Content-Type": "application/json"
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
