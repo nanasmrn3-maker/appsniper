@@ -40,7 +40,6 @@ class BinanceFuturesAPI:
         query_string = urlencode(params)
         signature = self._generate_signature(query_string)
         
-        # URL Query string yang valid untuk Binance Futures REST API
         url = f"{self.base_url}{endpoint}?{query_string}&signature={signature}"
         
         if method.upper() == "GET":
@@ -133,7 +132,8 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
+        clean_key = api_key.strip()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -156,8 +156,10 @@ async def main(page: ft.Page):
             }]
         }
         
+        # Mengirimkan API Key via Header x-goog-api-key dan URL Parameter untuk kompatibilitas penuh format AQ.
         headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-goog-api-key": clean_key
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
