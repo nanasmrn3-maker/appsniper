@@ -39,14 +39,14 @@ class BinanceFuturesAPI:
         params["timestamp"] = int(time.time() * 1000)
         query_string = urlencode(params)
         signature = self._generate_signature(query_string)
-        full_query = f"{query_string}&signature={signature}"
         
-        url = f"{self.base_url}{endpoint}"
+        # URL Query string yang valid untuk Binance Futures REST API
+        url = f"{self.base_url}{endpoint}?{query_string}&signature={signature}"
         
         if method.upper() == "GET":
-            res = requests.get(f"{url}?{full_query}", headers=self._headers(), timeout=15, verify=False)
+            res = requests.get(url, headers=self._headers(), timeout=15, verify=False)
         else:
-            res = requests.post(url, headers=self._headers(), data=full_query, timeout=15, verify=False)
+            res = requests.post(url, headers=self._headers(), timeout=15, verify=False)
             
         res.raise_for_status()
         return res.json()
@@ -135,7 +135,6 @@ async def main(page: ft.Page):
     def call_gemini_rest_api(api_key, image_path, prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         
-        # BACA BYTES GAMBAR ASLI TANPA POTONGAN AGAR HEADER FILE VALID
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
