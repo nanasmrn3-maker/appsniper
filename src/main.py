@@ -132,8 +132,8 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        clean_key = api_key.strip()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        # DIPERBARUI: Menggunakan model gemini-1.5-flash yang stabil
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -156,10 +156,9 @@ async def main(page: ft.Page):
             }]
         }
         
-        # Mengirimkan API Key via Header x-goog-api-key dan URL Parameter untuk kompatibilitas penuh format AQ.
         headers = {
             "Content-Type": "application/json",
-            "x-goog-api-key": clean_key
+            "x-goog-api-key": api_key.strip()
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
