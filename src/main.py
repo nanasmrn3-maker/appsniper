@@ -132,8 +132,8 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # DIPERBARUI: Menggunakan model gemini-1.5-flash yang stabil
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
+        # MENGGUNAKAN ENDPOINT STABIL 'v1' BUKAN 'v1beta'
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -156,9 +156,9 @@ async def main(page: ft.Page):
             }]
         }
         
+        # HANYA CONTENT-TYPE, TANPA x-goog-api-key UNTUK MENGHINDARI KONFLIK AUTH
         headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key.strip()
+            "Content-Type": "application/json"
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
