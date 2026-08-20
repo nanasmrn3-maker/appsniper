@@ -132,8 +132,31 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # MENGGUNAKAN ENDPOINT STABIL 'v1' BUKAN 'v1beta'
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
+        clean_key = api_key.strip()
+        
+        # 1. Deteksi otomatis model aktif yang tersedia di API Key Anda
+        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
+        list_res = requests.get(list_url, timeout=15, verify=False)
+        list_res.raise_for_status()
+        models_data = list_res.json().get("models", [])
+        
+        # Cari model flash atau model yang mendukung generateContent
+        selected_model = None
+        for m in models_data:
+            methods = m.get("supportedGenerationMethods", [])
+            name = m.get("name", "")
+            if "generateContent" in methods:
+                if "flash" in name.lower():
+                    selected_model = name
+                    break
+                elif not selected_model:
+                    selected_model = name
+        
+        if not selected_model:
+            selected_model = "models/gemini-2.0-flash"
+
+        # 2. Kirim gambar ke model yang berhasil terdeteksi
+        url = f"https://generativelanguage.googleapis.com/v1beta/{selected_model}:generateContent?key={clean_key}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -156,11 +179,7 @@ async def main(page: ft.Page):
             }]
         }
         
-        # HANYA CONTENT-TYPE, TANPA x-goog-api-key UNTUK MENGHINDARI KONFLIK AUTH
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
+        headers = {"Content-Type": "application/json"}
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
         res.raise_for_status()
         data = res.json()
