@@ -132,31 +132,9 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        clean_key = api_key.strip()
-        
-        # 1. Deteksi otomatis model aktif yang tersedia di API Key Anda
-        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
-        list_res = requests.get(list_url, timeout=15, verify=False)
-        list_res.raise_for_status()
-        models_data = list_res.json().get("models", [])
-        
-        # Cari model flash atau model yang mendukung generateContent
-        selected_model = None
-        for m in models_data:
-            methods = m.get("supportedGenerationMethods", [])
-            name = m.get("name", "")
-            if "generateContent" in methods:
-                if "flash" in name.lower():
-                    selected_model = name
-                    break
-                elif not selected_model:
-                    selected_model = name
-        
-        if not selected_model:
-            selected_model = "models/gemini-2.0-flash"
-
-        # 2. Kirim gambar ke model yang berhasil terdeteksi
-        url = f"https://generativelanguage.googleapis.com/v1beta/{selected_model}:generateContent?key={clean_key}"
+        # UPDATE: Menggunakan model terbaru yang direkomendasikan
+        target_model = "gemini-3.6-flash" 
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={api_key.strip()}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
