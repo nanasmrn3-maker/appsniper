@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- HELPER FUNGSIONAL BINANCE REST API ---
+# --- BINANCE FUTURES REST CLIENT ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key.strip()
@@ -35,11 +35,10 @@ class BinanceFuturesAPI:
     def _request(self, method, endpoint, params=None):
         if params is None:
             params = {}
-        
         params["timestamp"] = int(time.time() * 1000)
+        
         query_string = urlencode(params)
         signature = self._generate_signature(query_string)
-        
         url = f"{self.base_url}{endpoint}?{query_string}&signature={signature}"
         
         if method.upper() == "GET":
@@ -71,17 +70,15 @@ class BinanceFuturesAPI:
             "type": order_type.upper(),
             "quantity": f"{quantity:.3f}",
         }
-        
         if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]:
             params["stopPrice"] = f"{stop_price}"
-            
         if reduce_only:
             params["reduceOnly"] = "true"
             
         return self._request("POST", "/fapi/v1/order", params)
 
 
-# --- APP MAIN FLET ---
+# --- APLIKASI FLET UTAMA ---
 async def main(page: ft.Page):
     page.title = "Sniper Bot Mobile"
     page.theme_mode = ft.ThemeMode.DARK
@@ -132,8 +129,9 @@ async def main(page: ft.Page):
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
-        # MENGGUNAKAN MODEL RESMI GEMINI 3.6 FLASH
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key.strip()}"
+        clean_key = api_key.strip()
+        # KEMBALI KE MODEL VALID: gemini-2.5-flash
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -157,8 +155,7 @@ async def main(page: ft.Page):
         }
         
         headers = {
-            "Content-Type": "application/json",
-            "Connection": "close"
+            "Content-Type": "application/json"
         }
         
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
