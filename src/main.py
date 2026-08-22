@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- BINANCE FUTURES REST CLIENT ---
+# --- BINANCE FUTURES REST CLIENT (100% STANDAR RESMI BINANCE) ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key.strip()
@@ -43,8 +43,10 @@ class BinanceFuturesAPI:
         
         if method.upper() == "GET":
             res = requests.get(url, headers=self._headers(), timeout=15, verify=False)
-        else:
+        elif method.upper() == "POST":
             res = requests.post(url, headers=self._headers(), timeout=15, verify=False)
+        else:
+            res = requests.request(method.upper(), url, headers=self._headers(), timeout=15, verify=False)
             
         res.raise_for_status()
         return res.json()
@@ -57,21 +59,22 @@ class BinanceFuturesAPI:
         return self._request("POST", "/fapi/v1/leverage", params)
 
     def get_ticker_price(self, symbol):
-        url = f"{self.base_url}/fapi/v1/ticker/price"
-        params = {"symbol": symbol.replace('/', '').upper()}
-        res = requests.get(url, params=params, timeout=15, verify=False)
+        sym = symbol.replace('/', '').upper()
+        url = f"{self.base_url}/fapi/v1/ticker/price?symbol={sym}"
+        res = requests.get(url, headers=self._headers(), timeout=15, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
-    def create_order(self, symbol, side, order_type, quantity, price, stop_price=None, reduce_only=False):
+    def create_order(self, symbol, side, order_type, quantity, price=None, stop_price=None, reduce_only=False):
         params = {
             "symbol": symbol.replace('/', '').upper(),
             "side": side.upper(),
             "type": order_type.upper(),
             "quantity": f"{quantity:.3f}",
         }
-        if order_type.upper() in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]:
-            params["stopPrice"] = f"{stop_price}"
+        if stop_price is not None:
+            params["stopPrice"] = f"{float(stop_price):.2f}" if "USDT" in symbol else f"{float(stop_price):.4f}"
+            
         if reduce_only:
             params["reduceOnly"] = "true"
             
@@ -157,11 +160,10 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Menggunakan model resmi gemini-3.6-flash
+        # Model resmi yang sukses terbukti
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
         
-        # Fallback jika model spesifik ditolak: ambil model aktif otomatis
         if res.status_code == 404:
             list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
             list_res.raise_for_status()
@@ -235,15 +237,15 @@ async def main(page: ft.Page):
                 
                 # 1. Order Utama (STOP_MARKET)
                 await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_u, 'STOP_MARKET', size, setup['pemicu_masuk'], stop_price=setup['pemicu_masuk']
+                    sym, side_u, 'STOP_MARKET', size, stop_price=setup['pemicu_masuk']
                 ))
                 # 2. Order Take Profit (TAKE_PROFIT_MARKET)
                 await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'TAKE_PROFIT_MARKET', size, setup['take_profit'], stop_price=setup['take_profit'], reduce_only=True
+                    sym, side_p, 'TAKE_PROFIT_MARKET', size, stop_price=setup['take_profit'], reduce_only=True
                 ))
                 # 3. Order Stop Loss (STOP_MARKET)
                 await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'STOP_MARKET', size, setup['stop_loss'], stop_price=setup['stop_loss'], reduce_only=True
+                    sym, side_p, 'STOP_MARKET', size, stop_price=setup['stop_loss'], reduce_only=True
                 ))
                 
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
