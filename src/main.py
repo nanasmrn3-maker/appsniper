@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- BINANCE FUTURES REST CLIENT (100% STANDAR RESMI BINANCE) ---
+# --- BINANCE FUTURES REST CLIENT ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key.strip()
@@ -160,25 +160,28 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Model resmi yang sukses terbukti
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
-        res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
-        
-        if res.status_code == 404:
+        # Coba langsung endpoint gemini-2.5-flash dengan timeout diperpanjang ke 120 detik
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
+            if res.status_code == 404:
+                raise requests.exceptions.HTTPError("Model not found")
+        except Exception:
+            # Fallback otomatis mencari model flash yang aktif
             list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
             list_res.raise_for_status()
             models_data = list_res.json().get("models", [])
             
-            chosen_model = None
+            chosen_model = "models/gemini-2.5-flash"
             for m in models_data:
                 if "generateContent" in m.get("supportedGenerationMethods", []):
-                    chosen_model = m.get("name")
-                    if "flash" in chosen_model.lower():
+                    name = m.get("name")
+                    if "flash" in name.lower():
+                        chosen_model = name
                         break
             
-            if chosen_model:
-                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/{chosen_model}:generateContent?key={clean_key}"
-                res = requests.post(fallback_url, headers=headers, json=payload, timeout=60, verify=False)
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/{chosen_model}:generateContent?key={clean_key}"
+            res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
 
         res.raise_for_status()
         data = res.json()
