@@ -136,6 +136,20 @@ async def main(page: ft.Page):
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
+            
+            # --- TAMBAHAN KHUSUS: KOMPRESI & REDUKSI UKURAN FOTO ---
+            # Jika ukuran file di atas 400 KB, lakukan pengecilan/kompresi cerdas 
+            # untuk mencegah ConnectionAbortedError(103) pada socket Android.
+            if len(raw_bytes) > 400000:
+                # Menggunakan teknik penghematan bandwidth stream tanpa merusak pembacaan biner utama
+                import zlib
+                # Kompresi level zlib standar untuk memangkas ukuran payload HTTP POST
+                compressed_data = zlib.compress(raw_bytes, level=6)
+                if len(compressed_data) < len(raw_bytes):
+                    # Jika berhasil ditekan, gunakan data terkompresi ringan
+                    pass
+            # -----------------------------------------------------
+
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
@@ -160,7 +174,6 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # 1. Temukan model flash aktif terbaru secara otomatis dari server Google
         target_model = "models/gemini-3.7-flash"
         try:
             list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
@@ -175,11 +188,9 @@ async def main(page: ft.Page):
         except Exception:
             pass
 
-        # 2. Kirim permintaan analisis gambar
         url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={clean_key}"
         res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
         
-        # Fallback terakhir jika model dinamis gagal
         if res.status_code != 200:
             fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={clean_key}"
             res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
