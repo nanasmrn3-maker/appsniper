@@ -160,27 +160,28 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Coba langsung endpoint gemini-2.5-flash dengan timeout diperpanjang ke 120 detik
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        # 1. Ambil daftar model secara dinamis dari akun pengguna agar selalu valid 100%
+        target_model = "models/gemini-1.5-flash"
         try:
-            res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
-            if res.status_code == 404:
-                raise requests.exceptions.HTTPError("Model not found")
-        except Exception:
-            # Fallback otomatis mencari model flash yang aktif
             list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
-            list_res.raise_for_status()
-            models_data = list_res.json().get("models", [])
-            
-            chosen_model = "models/gemini-2.5-flash"
-            for m in models_data:
-                if "generateContent" in m.get("supportedGenerationMethods", []):
-                    name = m.get("name")
-                    if "flash" in name.lower():
-                        chosen_model = name
+            if list_res.status_code == 200:
+                models_data = list_res.json().get("models", [])
+                for m in models_data:
+                    methods = m.get("supportedGenerationMethods", [])
+                    name = m.get("name", "")
+                    if "generateContent" in methods and "flash" in name.lower():
+                        target_model = name
                         break
-            
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/{chosen_model}:generateContent?key={clean_key}"
+        except Exception:
+            pass
+
+        # 2. Kirim request ke model yang valid
+        url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={clean_key}"
+        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
+        
+        # Jika masih gagal, paksa fallback ke gemini-1.5-flash standar
+        if res.status_code != 200:
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
             res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
 
         res.raise_for_status()
