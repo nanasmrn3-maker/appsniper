@@ -130,8 +130,6 @@ async def main(page: ft.Page):
 
     def call_gemini_rest_api(api_key, image_path, prompt):
         clean_key = api_key.strip()
-        # KEMBALI KE MODEL VALID: gemini-2.5-flash
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
@@ -155,10 +153,31 @@ async def main(page: ft.Page):
         }
         
         headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Connection": "close"
         }
-        
+
+        # Menggunakan model resmi gemini-3.6-flash
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
         res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
+        
+        # Fallback jika model spesifik ditolak: ambil model aktif otomatis
+        if res.status_code == 404:
+            list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
+            list_res.raise_for_status()
+            models_data = list_res.json().get("models", [])
+            
+            chosen_model = None
+            for m in models_data:
+                if "generateContent" in m.get("supportedGenerationMethods", []):
+                    chosen_model = m.get("name")
+                    if "flash" in chosen_model.lower():
+                        break
+            
+            if chosen_model:
+                fallback_url = f"https://generativelanguage.googleapis.com/v1beta/{chosen_model}:generateContent?key={clean_key}"
+                res = requests.post(fallback_url, headers=headers, json=payload, timeout=60, verify=False)
+
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
