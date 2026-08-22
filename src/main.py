@@ -160,8 +160,8 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # 1. Ambil daftar model secara dinamis dari akun pengguna agar selalu valid 100%
-        target_model = "models/gemini-1.5-flash"
+        # 1. Temukan model flash aktif terbaru secara otomatis dari server Google
+        target_model = "models/gemini-3.7-flash"
         try:
             list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
             if list_res.status_code == 200:
@@ -175,13 +175,13 @@ async def main(page: ft.Page):
         except Exception:
             pass
 
-        # 2. Kirim request ke model yang valid
+        # 2. Kirim permintaan analisis gambar
         url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={clean_key}"
         res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
         
-        # Jika masih gagal, paksa fallback ke gemini-1.5-flash standar
+        # Fallback terakhir jika model dinamis gagal
         if res.status_code != 200:
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={clean_key}"
             res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
 
         res.raise_for_status()
