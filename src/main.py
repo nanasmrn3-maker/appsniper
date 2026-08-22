@@ -160,37 +160,19 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Daftar model prioritas untuk dicoba secara bergantian jika terjadi 503 / high demand
-        candidate_models = [
-            "models/gemini-3.7-flash",
-            "models/gemini-2.5-flash",
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro"
-        ]
+        # Menggunakan model resmi yang didukung secara universal (gemini-2.5-flash)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        
+        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
+        
+        # Jika rute gagal/404/405, coba gunakan gemini-1.5-flash sebagai fallback otomatis
+        if res.status_code != 200:
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
+            res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
 
-        # Mekanisme Auto-Retry & Fallback lintas model saat 503
-        res = None
-        for model in candidate_models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={clean_key}"
-            for attempt in range(2): # Coba 2 kali per model
-                try:
-                    res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
-                    if res.status_code == 200:
-                        data = res.json()
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    elif res.status_code == 503:
-                        time.sleep(2) # Tunggu sejenak jika server sibuk
-                        continue
-                    else:
-                        break # Jika error selain 503/404, langsung hentikan loop model ini
-                except Exception:
-                    time.sleep(1)
-                    continue
-
-        # Jika semua kandidat gagal, lempar error asli dari respons terakhir
-        if res is not None:
-            res.raise_for_status()
-        raise Exception("Semua model Gemini sedang mengalami gangguan/beban tinggi (503). Silakan coba beberapa saat lagi.")
+        res.raise_for_status()
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
