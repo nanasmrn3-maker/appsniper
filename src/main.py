@@ -136,20 +136,6 @@ async def main(page: ft.Page):
         
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
-            
-            # --- TAMBAHAN KHUSUS: KOMPRESI & REDUKSI UKURAN FOTO ---
-            # Jika ukuran file di atas 400 KB, lakukan pengecilan/kompresi cerdas 
-            # untuk mencegah ConnectionAbortedError(103) pada socket Android.
-            if len(raw_bytes) > 400000:
-                # Menggunakan teknik penghematan bandwidth stream tanpa merusak pembacaan biner utama
-                import zlib
-                # Kompresi level zlib standar untuk memangkas ukuran payload HTTP POST
-                compressed_data = zlib.compress(raw_bytes, level=6)
-                if len(compressed_data) < len(raw_bytes):
-                    # Jika berhasil ditekan, gunakan data terkompresi ringan
-                    pass
-            # -----------------------------------------------------
-
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
@@ -174,30 +160,37 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        target_model = "models/gemini-3.7-flash"
-        try:
-            list_res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}", timeout=15, verify=False)
-            if list_res.status_code == 200:
-                models_data = list_res.json().get("models", [])
-                for m in models_data:
-                    methods = m.get("supportedGenerationMethods", [])
-                    name = m.get("name", "")
-                    if "generateContent" in methods and "flash" in name.lower():
-                        target_model = name
-                        break
-        except Exception:
-            pass
+        # Daftar model prioritas untuk dicoba secara bergantian jika terjadi 503 / high demand
+        candidate_models = [
+            "models/gemini-3.7-flash",
+            "models/gemini-2.5-flash",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro"
+        ]
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/{target_model}:generateContent?key={clean_key}"
-        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
-        
-        if res.status_code != 200:
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={clean_key}"
-            res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
+        # Mekanisme Auto-Retry & Fallback lintas model saat 503
+        res = None
+        for model in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={clean_key}"
+            for attempt in range(2): # Coba 2 kali per model
+                try:
+                    res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
+                    if res.status_code == 200:
+                        data = res.json()
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    elif res.status_code == 503:
+                        time.sleep(2) # Tunggu sejenak jika server sibuk
+                        continue
+                    else:
+                        break # Jika error selain 503/404, langsung hentikan loop model ini
+                except Exception:
+                    time.sleep(1)
+                    continue
 
-        res.raise_for_status()
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        # Jika semua kandidat gagal, lempar error asli dari respons terakhir
+        if res is not None:
+            res.raise_for_status()
+        raise Exception("Semua model Gemini sedang mengalami gangguan/beban tinggi (503). Silakan coba beberapa saat lagi.")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
