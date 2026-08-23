@@ -165,11 +165,10 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Model resmi
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        # Menggunakan endpoint gemini-3.6-flash sesuai instruksi resmi server Google
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
         res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
         
-        # Tampilkan error asli jika ada penolakan dari server
         res.raise_for_status()
         data = res.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]
