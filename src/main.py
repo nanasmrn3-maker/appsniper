@@ -7,10 +7,27 @@ import requests
 import hmac
 import hashlib
 import time
+import math
 import urllib3
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation
 from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def round_step(value: Decimal, step_str: str, rounding=ROUND_DOWN) -> Decimal:
+    """Membulatkan `value` ke kelipatan `step_str` (mis. stepSize/tickSize dari Binance),
+    lalu menormalkan jumlah desimalnya agar sesuai dengan step tersebut.
+    Ini yang membuat bot bisa dipakai di SEMUA simbol, bukan cuma BTC/ETH."""
+    step = Decimal(step_str)
+    if step == 0:
+        return value
+    quotient = (value / step).to_integral_value(rounding=rounding)
+    result = quotient * step
+    decimals = max(0, -step.as_tuple().exponent)
+    quant = Decimal(1).scaleb(-decimals) if decimals > 0 else Decimal(1)
+    return result.quantize(quant, rounding=rounding)
+
 
 # --- BINANCE FUTURES REST CLIENT ---
 class BinanceFuturesAPI:
@@ -65,38 +82,70 @@ class BinanceFuturesAPI:
         res.raise_for_status()
         return float(res.json()["price"])
 
-    def create_order(self, symbol, side, order_type, quantity, price=None, stop_price=None, reduce_only=False):
+    def get_exchange_info(self, symbol):
+        # Endpoint publik, tidak perlu signature.
+        sym = symbol.replace('/', '').upper()
+        url = f"{self.base_url}/fapi/v1/exchangeInfo?symbol={sym}"
+        res = requests.get(url, timeout=15, verify=False)
+        res.raise_for_status()
+        data = res.json()
+        symbols = data.get("symbols", [])
+        if not symbols:
+            raise Exception(f"Simbol {sym} tidak ditemukan di Binance Futures. Cek ejaan simbolnya.")
+        return symbols[0]
+
+    def get_symbol_filters(self, symbol):
+        """Ambil stepSize (kelipatan quantity), tickSize (kelipatan harga),
+        dan minNotional untuk simbol tertentu. Ini kunci fix masalah desimal."""
+        info = self.get_exchange_info(symbol)
+        filters = {f['filterType']: f for f in info.get('filters', [])}
+        lot = filters.get('LOT_SIZE', {})
+        pricef = filters.get('PRICE_FILTER', {})
+        min_notional_f = filters.get('MIN_NOTIONAL', {})
+        return {
+            "qty_step": lot.get('stepSize', '0.001'),
+            "min_qty": lot.get('minQty', '0.001'),
+            "price_tick": pricef.get('tickSize', '0.01'),
+            "min_notional": min_notional_f.get('notional', '5'),
+        }
+
+    def create_order(self, symbol, side, order_type, quantity_str, stop_price_str=None, reduce_only=False):
         params = {
             "symbol": symbol.replace('/', '').upper(),
             "side": side.upper(),
             "type": order_type.upper(),
-            "quantity": f"{quantity:.3f}",
+            "quantity": quantity_str,
         }
-        if stop_price is not None:
-            params["stopPrice"] = f"{float(stop_price):.2f}" if "USDT" in symbol else f"{float(stop_price):.4f}"
-
+        if stop_price_str is not None:
+            params["stopPrice"] = stop_price_str
         if reduce_only:
             params["reduceOnly"] = "true"
-
         return self._request("POST", "/fapi/v1/order", params)
 
-    def create_algo_order(self, symbol, side, order_type, quantity, trigger_price, reduce_only=False):
+    def create_algo_order(self, symbol, side, order_type, quantity_str, trigger_price_str, reduce_only=False):
         # Sejak 9 Des 2025 Binance memindahkan order kondisional
         # (STOP_MARKET, TAKE_PROFIT_MARKET, dll) ke endpoint Algo Order.
-        # Perhatikan: parameter harganya bernama "triggerPrice", BUKAN "stopPrice".
+        # Parameter harganya bernama "triggerPrice", BUKAN "stopPrice".
         sym = symbol.replace('/', '').upper()
         params = {
             "algoType": "CONDITIONAL",
             "symbol": sym,
             "side": side.upper(),
             "type": order_type.upper(),
-            "quantity": f"{quantity:.3f}",
-            "triggerPrice": f"{float(trigger_price):.2f}" if "USDT" in sym else f"{float(trigger_price):.4f}",
+            "quantity": quantity_str,
+            "triggerPrice": trigger_price_str,
         }
         if reduce_only:
             params["reduceOnly"] = "true"
-
         return self._request("POST", "/fapi/v1/algoOrder", params)
+
+    def get_income_history(self, start_time_ms, income_type="REALIZED_PNL"):
+        params = {
+            "incomeType": income_type,
+            "startTime": start_time_ms,
+            "limit": 1000
+        }
+        return self._request("GET", "/fapi/v1/income", params)
 
 
 # --- APLIKASI FLET UTAMA ---
@@ -113,6 +162,7 @@ async def main(page: ft.Page):
     saved_api_sec = await sp.get("api_sec") or ""
     saved_margin = await sp.get("margin") or "10"
     saved_leverage = await sp.get("leverage") or "20"
+    saved_max_loss = await sp.get("max_loss") or "50"
 
     async def save_data(e):
         await sp.set("api_ai", api_ai.value or "")
@@ -120,16 +170,20 @@ async def main(page: ft.Page):
         await sp.set("api_sec", api_sec.value or "")
         await sp.set("margin", input_margin.value or "")
         await sp.set("leverage", input_lev.value or "")
+        await sp.set("max_loss", input_max_loss.value or "")
 
     api_ai = ft.TextField(label="Claude API Key", password=True, can_reveal_password=True, value=saved_api_ai, on_blur=save_data)
     api_bin = ft.TextField(label="Binance API Key", password=True, can_reveal_password=True, value=saved_api_bin, on_blur=save_data)
     api_sec = ft.TextField(label="Binance Secret", password=True, can_reveal_password=True, value=saved_api_sec, on_blur=save_data)
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
     input_lev = ft.TextField(label="Leverage", value=saved_leverage, on_blur=save_data)
-    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT atau CAP/USDT)", value="BTCUSDT")
+    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT, ETHUSDT, SOLUSDT)", value="BTCUSDT")
+    input_max_loss = ft.TextField(label="Batas Rugi 24 Jam (USDT)", value=saved_max_loss, on_blur=save_data)
 
     path_foto = ft.Text("Belum ada foto dipilih")
     layar_log = ft.Text("Status: Standby", color=ft.Colors.YELLOW)
+
+    launch_button = ft.Button("LUNCURKAN OTOMATIS", bgcolor=ft.Colors.RED_800, color=ft.Colors.WHITE)
 
     async def pick_files_click(e):
         files = await file_picker.pick_files()
@@ -140,6 +194,7 @@ async def main(page: ft.Page):
     def tampilkan_peringatan(judul, pesan):
         layar_log.value = f"Status: {judul}\n\nDetail: {pesan}"
         layar_log.color = ft.Colors.RED
+        layar_log.update()
 
         def tutup_dialog(e):
             dialog.open = False
@@ -153,6 +208,37 @@ async def main(page: ft.Page):
         page.dialog = dialog
         dialog.open = True
         page.update()
+
+    async def minta_konfirmasi(ringkasan_text):
+        """Fitur #1: Dialog konfirmasi wajib sebelum order nyata dikirim ke Binance."""
+        hasil = {"confirmed": False}
+        event = asyncio.Event()
+
+        def on_ya(e):
+            hasil["confirmed"] = True
+            dialog.open = False
+            page.update()
+            event.set()
+
+        def on_batal(e):
+            hasil["confirmed"] = False
+            dialog.open = False
+            page.update()
+            event.set()
+
+        dialog = ft.AlertDialog(
+            title=ft.Text("Konfirmasi Order Nyata"),
+            content=ft.Text(ringkasan_text),
+            actions=[
+                ft.TextButton("BATAL", on_click=on_batal),
+                ft.TextButton("YA, LANJUTKAN", on_click=on_ya),
+            ]
+        )
+        page.dialog = dialog
+        dialog.open = True
+        page.update()
+        await event.wait()
+        return hasil["confirmed"]
 
     def call_claude_api(api_key, image_path, prompt):
         clean_key = api_key.strip()
@@ -201,24 +287,27 @@ async def main(page: ft.Page):
         if not content_blocks:
             raise Exception(f"Respons Claude tidak berisi content. Raw: {json.dumps(data)[:500]}")
 
-        # Cari blok bertipe "text" (bisa ada beberapa blok, mis. jika ada thinking block)
         for block in content_blocks:
             if block.get("type") == "text" and "text" in block:
                 return block["text"]
 
-        # Kalau tidak ada blok "text" sama sekali, tampilkan raw response untuk diagnosis
         raise Exception(f"Tidak ada blok teks pada respons Claude. Raw: {json.dumps(data)[:500]}")
 
     async def luncurkan_execution():
-        if not path_foto.value or "Belum ada" in path_foto.value:
-            tampilkan_peringatan("Foto Belum Dipilih", "Silakan upload foto chart terlebih dahulu sebelum meluncurkan bot.")
-            return
-
-        layar_log.value = "Status: Menghubungi Claude AI..."
-        layar_log.color = ft.Colors.BLUE
+        # Fitur #4: kunci tombol selama proses berjalan, cegah eksekusi ganda akibat tap dobel.
+        launch_button.disabled = True
+        launch_button.text = "MEMPROSES..."
         page.update()
 
         try:
+            if not path_foto.value or "Belum ada" in path_foto.value:
+                tampilkan_peringatan("Foto Belum Dipilih", "Silakan upload foto chart terlebih dahulu sebelum meluncurkan bot.")
+                return
+
+            layar_log.value = "Status: Menghubungi Claude AI..."
+            layar_log.color = ft.Colors.BLUE
+            page.update()
+
             prompt = """
             Anda adalah sistem penembak jitu trading crypto. Analisis chart/gambar ini dengan sangat teliti.
             Perhatikan struktur harga terbaru yang tertera di chart.
@@ -245,57 +334,170 @@ async def main(page: ft.Page):
             end = raw_text.rfind('}') + 1
             setup = json.loads(raw_text[start:end])
 
-            if setup.get('sinyal') == "VALID":
-                layar_log.value = "Status: Sinyal VALID! Menembak Binance..."
-                page.update()
-
-                binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
-                margin = float(input_margin.value)
-                lev = int(input_lev.value)
-                sym = input_symbol.value.strip().replace('/', '').upper()
-
-                await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
-                price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
-                size = (margin * lev) / price
-
-                side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
-
-                # 1. Order Utama (STOP_MARKET) - via Algo Order API
-                await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                    sym, side_u, 'STOP_MARKET', size, trigger_price=setup['pemicu_masuk']
-                ))
-                # 2. Order Take Profit (TAKE_PROFIT_MARKET) - via Algo Order API
-                await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                    sym, side_p, 'TAKE_PROFIT_MARKET', size, trigger_price=setup['take_profit'], reduce_only=True
-                ))
-                # 3. Order Stop Loss (STOP_MARKET) - via Algo Order API
-                await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                    sym, side_p, 'STOP_MARKET', size, trigger_price=setup['stop_loss'], reduce_only=True
-                ))
-
-                layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
-                layar_log.color = ft.Colors.GREEN
-                page.update()
-            else:
+            if setup.get('sinyal') != "VALID":
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
+                return
+
+            binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
+            sym = input_symbol.value.strip().replace('/', '').upper()
+            margin = float(input_margin.value)
+            lev = int(input_lev.value)
+            arah = setup['arah']
+
+            layar_log.value = "Status: Mengambil data pasar & aturan simbol..."
+            page.update()
+
+            # Ambil harga pasar & aturan presisi (stepSize/tickSize) simbol ini secara dinamis.
+            # Ini yang membuat bot bekerja untuk SEMUA koin, tidak cuma BTC/ETH.
+            current_price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
+            filters = await loop.run_in_executor(None, lambda: binance.get_symbol_filters(sym))
+
+            try:
+                entry = Decimal(str(setup['pemicu_masuk']))
+                tp = Decimal(str(setup['take_profit']))
+                sl = Decimal(str(setup['stop_loss']))
+            except (InvalidOperation, KeyError, TypeError):
+                tampilkan_peringatan("Data AI Tidak Valid", "Respons AI tidak berisi angka harga yang bisa dibaca.")
+                return
+
+            # Fitur #2: validasi kewajaran harga sebelum eksekusi.
+            current_price_dec = Decimal(str(current_price))
+            masalah = []
+
+            if arah == 'BUY':
+                if not (sl < entry < tp):
+                    masalah.append(f"Urutan harga tidak masuk akal untuk BUY (harus SL < Entry < TP). Diterima: SL={sl}, Entry={entry}, TP={tp}")
+            elif arah == 'SELL':
+                if not (tp < entry < sl):
+                    masalah.append(f"Urutan harga tidak masuk akal untuk SELL (harus TP < Entry < SL). Diterima: TP={tp}, Entry={entry}, SL={sl}")
+            else:
+                masalah.append(f"Arah tidak dikenali dari AI: '{arah}'")
+
+            deviasi = abs(entry - current_price_dec) / current_price_dec if current_price_dec != 0 else Decimal(1)
+            if deviasi > Decimal("0.10"):
+                masalah.append(f"Harga entry ({entry}) menyimpang {float(deviasi)*100:.1f}% dari harga pasar saat ini ({current_price}). Kemungkinan AI salah membaca chart.")
+
+            if masalah:
+                tampilkan_peringatan("Validasi Harga Gagal", "\n".join(masalah))
+                return
+
+            # Bulatkan quantity & harga sesuai stepSize/tickSize resmi Binance untuk simbol ini.
+            raw_size = Decimal(str((margin * lev))) / current_price_dec
+            size_dec = round_step(raw_size, filters['qty_step'], ROUND_DOWN)
+            min_qty = Decimal(filters['min_qty'])
+
+            if size_dec < min_qty or size_dec <= 0:
+                tampilkan_peringatan(
+                    "Ukuran Posisi Terlalu Kecil",
+                    f"Quantity hasil hitung ({size_dec}) di bawah minimum simbol ini ({min_qty}). Naikkan margin atau leverage."
+                )
+                return
+
+            notional = size_dec * current_price_dec
+            min_notional = Decimal(filters['min_notional'])
+            if notional < min_notional:
+                tampilkan_peringatan(
+                    "Notional Terlalu Kecil",
+                    f"Nilai order ({notional:.2f} USDT) di bawah minimum Binance untuk simbol ini ({min_notional} USDT). Naikkan margin atau leverage."
+                )
+                return
+
+            entry_dec = round_step(entry, filters['price_tick'], ROUND_HALF_UP)
+            tp_dec = round_step(tp, filters['price_tick'], ROUND_HALF_UP)
+            sl_dec = round_step(sl, filters['price_tick'], ROUND_HALF_UP)
+
+            # Fitur #3: batas rugi 24 jam terakhir (rolling), dicek ke riwayat income asli dari Binance.
+            layar_log.value = "Status: Mengecek batas rugi 24 jam..."
+            page.update()
+
+            start_24h_ms = int(time.time() * 1000) - 24 * 3600 * 1000
+            income_list = await loop.run_in_executor(None, lambda: binance.get_income_history(start_24h_ms))
+            total_pnl_24h = sum(float(item.get('income', 0)) for item in income_list)
+            max_loss = abs(float(input_max_loss.value or "0"))
+
+            if max_loss > 0 and total_pnl_24h <= -max_loss:
+                tampilkan_peringatan(
+                    "Batas Rugi Tercapai",
+                    f"Total PnL 24 jam terakhir: {total_pnl_24h:.2f} USDT (batas: -{max_loss:.2f} USDT). "
+                    f"Eksekusi dihentikan untuk mencegah kerugian lebih lanjut. Ubah 'Batas Rugi 24 Jam' kalau ingin lanjut."
+                )
+                return
+
+            # Fitur #1: konfirmasi eksplisit sebelum order nyata dikirim.
+            ringkasan = (
+                f"Simbol: {sym}\n"
+                f"Arah: {arah}\n"
+                f"Harga Pasar Saat Ini: {current_price}\n"
+                f"Entry (Stop): {entry_dec}\n"
+                f"Take Profit: {tp_dec}\n"
+                f"Stop Loss: {sl_dec}\n"
+                f"Quantity: {size_dec}\n"
+                f"Estimasi Notional: {notional:.2f} USDT\n"
+                f"Margin: {margin} USDT | Leverage: {lev}x\n"
+                f"PnL 24 Jam Terakhir: {total_pnl_24h:.2f} USDT\n\n"
+                f"Order ini akan LANGSUNG dieksekusi dengan uang sungguhan. Lanjutkan?"
+            )
+            layar_log.value = "Status: Menunggu konfirmasi Anda..."
+            layar_log.color = ft.Colors.YELLOW
+            page.update()
+
+            setuju = await minta_konfirmasi(ringkasan)
+            if not setuju:
+                layar_log.value = "Status: Dibatalkan oleh pengguna."
+                layar_log.color = ft.Colors.YELLOW
+                page.update()
+                return
+
+            layar_log.value = "Status: Sinyal VALID! Menembak Binance..."
+            layar_log.color = ft.Colors.BLUE
+            page.update()
+
+            await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
+
+            side_u, side_p = ('BUY', 'SELL') if arah == 'BUY' else ('SELL', 'BUY')
+            qty_str = str(size_dec)
+
+            # 1. Order Utama (STOP_MARKET) - via Algo Order API
+            await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                sym, side_u, 'STOP_MARKET', qty_str, trigger_price_str=str(entry_dec)
+            ))
+            # 2. Order Take Profit (TAKE_PROFIT_MARKET) - via Algo Order API
+            await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                sym, side_p, 'TAKE_PROFIT_MARKET', qty_str, trigger_price_str=str(tp_dec), reduce_only=True
+            ))
+            # 3. Order Stop Loss (STOP_MARKET) - via Algo Order API
+            await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                sym, side_p, 'STOP_MARKET', qty_str, trigger_price_str=str(sl_dec), reduce_only=True
+            ))
+
+            layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
+            layar_log.color = ft.Colors.GREEN
+            page.update()
 
         except requests.exceptions.HTTPError as err:
             err_msg = err.response.text if hasattr(err, 'response') and err.response is not None else str(err)
             tampilkan_peringatan("Gagal REST API", f"{err_msg}")
         except Exception as ex:
             tampilkan_peringatan("Terjadi Kesalahan", f"{str(ex)}")
+        finally:
+            # Fitur #4: buka kunci tombol lagi apapun hasilnya.
+            launch_button.disabled = False
+            launch_button.text = "LUNCURKAN OTOMATIS"
+            page.update()
 
     def on_luncurkan_click(e):
         asyncio.create_task(luncurkan_execution())
 
+    launch_button.on_click = on_luncurkan_click
+
     page.add(
         ft.Column([
             ft.Text("PUSAT KOMANDO SNIPER", size=20, weight="bold"),
-            api_ai, api_bin, api_sec, input_margin, input_lev, input_symbol,
+            api_ai, api_bin, api_sec, input_margin, input_lev, input_symbol, input_max_loss,
             ft.Divider(),
             ft.Button("UPLOAD FOTO", on_click=pick_files_click),
             path_foto,
-            ft.Button("LUNCURKAN OTOMATIS", bgcolor=ft.Colors.RED_800, color=ft.Colors.WHITE, on_click=on_luncurkan_click),
+            launch_button,
             layar_log
         ])
     )
