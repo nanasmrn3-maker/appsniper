@@ -18,8 +18,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def round_step(value: Decimal, step_str: str, rounding=ROUND_DOWN) -> Decimal:
     """Membulatkan `value` ke kelipatan `step_str` (mis. stepSize/tickSize dari Binance),
     lalu menormalkan jumlah desimalnya agar sesuai dengan step tersebut.
-    Ini yang membuat bot bisa dipakai di SEMUA simbol, bukan cuma BTC/ETH."""
-    step = Decimal(step_str)
+    Ini yang membuat bot bisa dipakai di SEMUA simbol, bukan cuma BTC/ETH.
+
+    PENTING: Binance sering mengirim stepSize/tickSize dengan nol berlebih di belakang
+    (mis. "0.00100000" bukan "0.001"). Kalau tidak dinormalisasi dulu, jumlah desimal
+    yang dihitung akan salah (8 desimal, padahal harusnya 3) dan Binance menolak order
+    dengan error -1111 "Precision is over the maximum defined for this asset."."""
+    step = Decimal(step_str).normalize()
     if step == 0:
         return value
     quotient = (value / step).to_integral_value(rounding=rounding)
