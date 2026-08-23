@@ -103,7 +103,7 @@ async def main(page: ft.Page):
         await sp.set("margin", input_margin.value or "")
         await sp.set("leverage", input_lev.value or "")
 
-    api_ai = ft.TextField(label="Gemini API Key", password=True, can_reveal_password=True, value=saved_api_ai, on_blur=save_data)
+    api_ai = ft.TextField(label="Claude API Key", password=True, can_reveal_password=True, value=saved_api_ai, on_blur=save_data)
     api_bin = ft.TextField(label="Binance API Key", password=True, can_reveal_password=True, value=saved_api_bin, on_blur=save_data)
     api_sec = ft.TextField(label="Binance Secret", password=True, can_reveal_password=True, value=saved_api_sec, on_blur=save_data)
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
@@ -136,7 +136,7 @@ async def main(page: ft.Page):
         dialog.open = True
         page.update()
 
-    def call_gemini_rest_api(api_key, image_path, prompt):
+    def call_claude_api(api_key, image_path, prompt):
         clean_key = api_key.strip()
         
         with open(image_path, "rb") as image_file:
@@ -144,41 +144,50 @@ async def main(page: ft.Page):
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
 
         ext = os.path.splitext(image_path)[1].lower()
-        mime_type = "image/png" if ext == ".png" else "image/jpeg"
+        media_type = "image/png" if ext == ".png" else "image/jpeg"
+
+        headers = {
+            "x-api-key": clean_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
 
         payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": encoded_image
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 1000,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": encoded_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
                         }
-                    }
-                ]
-            }]
-        }
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Connection": "close"
+                    ]
+                }
+            ]
         }
 
-        # Menggunakan alias resmi production-ready Google (gemini-flash-latest) untuk menghindari server sibuk (503)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={clean_key}"
-        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
-        
+        url = "https://api.anthropic.com/v1/messages"
+        res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
         res.raise_for_status()
         data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        return data["content"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
             tampilkan_peringatan("Foto Belum Dipilih", "Silakan upload foto chart terlebih dahulu sebelum meluncurkan bot.")
             return
 
-        layar_log.value = "Status: Menghubungi Gemini AI..."
+        layar_log.value = "Status: Menghubungi Claude AI..."
         layar_log.color = ft.Colors.BLUE
         page.update()
 
@@ -201,7 +210,7 @@ async def main(page: ft.Page):
             
             loop = asyncio.get_running_loop()
             raw_response = await loop.run_in_executor(
-                None, lambda: call_gemini_rest_api(api_ai.value, path_foto.value, prompt)
+                None, lambda: call_claude_api(api_ai.value, path_foto.value, prompt)
             )
             
             raw_text = raw_response.strip().replace('```json', '').replace('```', '')
