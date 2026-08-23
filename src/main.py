@@ -123,12 +123,17 @@ async def main(page: ft.Page):
         layar_log.value = f"Status: {judul}\n\nDetail: {pesan}"
         layar_log.color = ft.Colors.RED
         
+        def tutup_dialog(e):
+            dialog.open = False
+            page.update()
+
         dialog = ft.AlertDialog(
             title=ft.Text(judul),
             content=ft.Text(pesan),
-            actions=[ft.TextButton("OK", on_click=lambda _: page.close(dialog))]
+            actions=[ft.TextButton("OK", on_click=tutup_dialog)]
         )
-        page.open(dialog)
+        page.dialog = dialog
+        dialog.open = True
         page.update()
 
     def call_gemini_rest_api(api_key, image_path, prompt):
@@ -160,19 +165,17 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # 1. Ambil daftar model aktif secara dinamis dari akun Google Anda
+        # 1. Ambil model aktif secara dinamis
         list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
         list_res = requests.get(list_url, timeout=15, verify=False)
         list_res.raise_for_status()
         models_data = list_res.json().get("models", [])
         
-        # Filter hanya model yang mendukung generateContent
         available_models = [
             m.get("name") for m in models_data 
             if "generateContent" in m.get("supportedGenerationMethods", [])
         ]
         
-        # Urutkan prioritas: flash terlebih dahulu, lalu pro
         flash_models = [m for m in available_models if "flash" in m.lower()]
         other_models = [m for m in available_models if "flash" not in m.lower()]
         target_list = flash_models + other_models
@@ -180,10 +183,9 @@ async def main(page: ft.Page):
         if not target_list:
             raise Exception("Tidak ada model AI yang aktif pada API Key ini.")
 
-        # 2. Eksekusi request ke model yang terverifikasi aktif
+        # 2. Eksekusi ke model aktif
         last_exception = None
         for model_name in target_list:
-            # model_name sudah berformat "models/gemini-..."
             url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={clean_key}"
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
