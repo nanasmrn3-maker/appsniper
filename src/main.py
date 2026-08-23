@@ -160,19 +160,46 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Menggunakan model resmi yang didukung secara universal (gemini-2.5-flash)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        # 1. Ambil daftar model aktif secara dinamis dari akun Google Anda
+        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
+        list_res = requests.get(list_url, timeout=15, verify=False)
+        list_res.raise_for_status()
+        models_data = list_res.json().get("models", [])
         
-        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
+        # Filter hanya model yang mendukung generateContent
+        available_models = [
+            m.get("name") for m in models_data 
+            if "generateContent" in m.get("supportedGenerationMethods", [])
+        ]
         
-        # Jika rute gagal/404/405, coba gunakan gemini-1.5-flash sebagai fallback otomatis
-        if res.status_code != 200:
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={clean_key}"
-            res = requests.post(fallback_url, headers=headers, json=payload, timeout=120, verify=False)
+        # Urutkan prioritas: flash terlebih dahulu, lalu pro
+        flash_models = [m for m in available_models if "flash" in m.lower()]
+        other_models = [m for m in available_models if "flash" not in m.lower()]
+        target_list = flash_models + other_models
 
-        res.raise_for_status()
-        data = res.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        if not target_list:
+            raise Exception("Tidak ada model AI yang aktif pada API Key ini.")
+
+        # 2. Eksekusi request ke model yang terverifikasi aktif
+        last_exception = None
+        for model_name in target_list:
+            # model_name sudah berformat "models/gemini-..."
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={clean_key}"
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                elif res.status_code in [503, 429]:
+                    time.sleep(2)
+                    continue
+            except Exception as e:
+                last_exception = e
+                continue
+
+        if last_exception:
+            raise last_exception
+        raise Exception("Gagal mendapatkan respon dari seluruh model yang tersedia.")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
