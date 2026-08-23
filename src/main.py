@@ -152,29 +152,27 @@ async def main(page: ft.Page):
             "content-type": "application/json"
         }
 
-        payload = {
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 1000,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": encoded_image
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt
-                        }
-                    ]
+payload = {
+    "model": "claude-sonnet-5",   # sebelumnya: "claude-3-5-sonnet-20241022"
+    "max_tokens": 1000,
+    "messages": [{
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": encoded_image
                 }
-            ]
-        }
+            },
+            {
+                "type": "text",
+                "text": prompt
+            }
+        ]
+    }]
+}
 
         url = "https://api.anthropic.com/v1/messages"
         res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
