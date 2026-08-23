@@ -191,23 +191,39 @@ async def main(page: ft.Page):
             path_foto.value = files[0].path
             path_foto.update()
 
+    def _show_dialog(dialog):
+        # Kompatibel dengan versi Flet lama (page.dialog + dialog.open) maupun
+        # versi baru (page.open). Ini yang bikin popup akhirnya benar-benar tampil
+        # berapapun versi Flet yang ke-install di CI.
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            if dialog not in page.overlay:
+                page.overlay.append(dialog)
+            dialog.open = True
+            page.update()
+
+    def _close_dialog(dialog):
+        if hasattr(page, "close"):
+            page.close(dialog)
+        else:
+            dialog.open = False
+            page.update()
+
     def tampilkan_peringatan(judul, pesan):
         layar_log.value = f"Status: {judul}\n\nDetail: {pesan}"
         layar_log.color = ft.Colors.RED
         layar_log.update()
 
         def tutup_dialog(e):
-            dialog.open = False
-            page.update()
+            _close_dialog(dialog)
 
         dialog = ft.AlertDialog(
             title=ft.Text(judul),
             content=ft.Text(pesan),
             actions=[ft.TextButton("OK", on_click=tutup_dialog)]
         )
-        page.dialog = dialog
-        dialog.open = True
-        page.update()
+        _show_dialog(dialog)
 
     async def minta_konfirmasi(ringkasan_text):
         """Fitur #1: Dialog konfirmasi wajib sebelum order nyata dikirim ke Binance."""
@@ -216,14 +232,12 @@ async def main(page: ft.Page):
 
         def on_ya(e):
             hasil["confirmed"] = True
-            dialog.open = False
-            page.update()
+            _close_dialog(dialog)
             event.set()
 
         def on_batal(e):
             hasil["confirmed"] = False
-            dialog.open = False
-            page.update()
+            _close_dialog(dialog)
             event.set()
 
         dialog = ft.AlertDialog(
@@ -234,9 +248,7 @@ async def main(page: ft.Page):
                 ft.TextButton("YA, LANJUTKAN", on_click=on_ya),
             ]
         )
-        page.dialog = dialog
-        dialog.open = True
-        page.update()
+        _show_dialog(dialog)
         await event.wait()
         return hasil["confirmed"]
 
