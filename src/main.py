@@ -165,43 +165,33 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # 1. Ambil model aktif secara dinamis
-        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={clean_key}"
-        list_res = requests.get(list_url, timeout=15, verify=False)
-        list_res.raise_for_status()
-        models_data = list_res.json().get("models", [])
-        
-        available_models = [
-            m.get("name") for m in models_data 
-            if "generateContent" in m.get("supportedGenerationMethods", [])
+        # Hanya targetkan model vision (multimodal) murni
+        candidate_vision_models = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.5-pro"
         ]
-        
-        flash_models = [m for m in available_models if "flash" in m.lower()]
-        other_models = [m for m in available_models if "flash" not in m.lower()]
-        target_list = flash_models + other_models
 
-        if not target_list:
-            raise Exception("Tidak ada model AI yang aktif pada API Key ini.")
-
-        # 2. Eksekusi ke model aktif
-        last_exception = None
-        for model_name in target_list:
-            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={clean_key}"
+        last_err = None
+        for mod in candidate_vision_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={clean_key}"
             try:
-                res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
+                res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
                 if res.status_code == 200:
                     data = res.json()
                     return data["candidates"][0]["content"]["parts"][0]["text"]
-                elif res.status_code in [503, 429]:
-                    time.sleep(2)
+                elif res.status_code in [404, 405]:
                     continue
-            except Exception as e:
-                last_exception = e
+                else:
+                    res.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                last_err = e
                 continue
 
-        if last_exception:
-            raise last_exception
-        raise Exception("Gagal mendapatkan respon dari seluruh model yang tersedia.")
+        if last_err:
+            raise last_err
+        raise Exception("Gagal terhubung ke model vision Gemini. Pastikan koneksi internet stabil.")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
