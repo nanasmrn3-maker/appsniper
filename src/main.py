@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- BINANCE FUTURES REST CLIENT ---
+# --- BINANCE FUTURES REST CLIENT (STABIL & KONSISTEN) ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
         self.api_key = api_key.strip()
@@ -61,7 +61,7 @@ class BinanceFuturesAPI:
     def get_ticker_price(self, symbol):
         sym = symbol.replace('/', '').upper()
         url = f"{self.base_url}/fapi/v1/ticker/price?symbol={sym}"
-        res = requests.get(url, headers=self._headers(), timeout=15, verify=False)
+        res = requests.get(url, headers={"X-MBX-APIKEY": self.api_key}, timeout=15, verify=False)
         res.raise_for_status()
         return float(res.json()["price"])
 
