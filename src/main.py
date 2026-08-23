@@ -177,7 +177,7 @@ async def main(page: ft.Page):
     api_sec = ft.TextField(label="Binance Secret", password=True, can_reveal_password=True, value=saved_api_sec, on_blur=save_data)
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
     input_lev = ft.TextField(label="Leverage", value=saved_leverage, on_blur=save_data)
-    input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT, ETHUSDT, SOLUSDT)", value="BTCUSDT")
+    input_symbol = ft.TextField(label="Simbol (Opsional - kosongkan agar dibaca otomatis dari screenshot)", value="")
     input_max_loss = ft.TextField(label="Batas Rugi 24 Jam (USDT)", value=saved_max_loss, on_blur=save_data)
 
     path_foto = ft.Text("Belum ada foto dipilih")
@@ -310,12 +310,19 @@ async def main(page: ft.Page):
 
             prompt = """
             Anda adalah sistem penembak jitu trading crypto. Analisis chart/gambar ini dengan sangat teliti.
-            Perhatikan struktur harga terbaru yang tertera di chart.
+
+            Langkah 1: Baca nama pair trading yang tertera di judul/header chart (biasanya di pojok kiri atas,
+            format seperti "BTCUSDT", "ETH/USDT", atau "SOL/USDT Perp"). Tuliskan hasilnya sebagai kode simbol
+            futures USDT-M tanpa spasi/garis miring, contoh: BTCUSDT, ETHUSDT, SOLUSDT.
+            Jika judul pair sama sekali tidak terlihat/tidak bisa dibaca di gambar, kosongkan field "simbol".
+
+            Langkah 2: Perhatikan struktur harga terbaru yang tertera di chart.
             Tentukan setup Stop Market (Entri, Take Profit, dan Stop Loss) berdasarkan analisis teknikal chart tersebut.
 
             Keluarkan HANYA format JSON murni tanpa kata-kata pembuka/penutup. Format wajib:
             {
                 "sinyal": "VALID",
+                "simbol": "BTCUSDT",
                 "arah": "BUY",
                 "pemicu_masuk": 0.00000,
                 "take_profit": 0.00000,
@@ -332,14 +339,49 @@ async def main(page: ft.Page):
             raw_text = raw_response.strip().replace('```json', '').replace('```', '')
             start = raw_text.find('{')
             end = raw_text.rfind('}') + 1
-            setup = json.loads(raw_text[start:end])
+
+            if start == -1 or end <= start:
+                tampilkan_peringatan(
+                    "AI Tidak Mengembalikan JSON",
+                    f"Respons Claude tidak mengandung format JSON yang diharapkan. "
+                    f"Kemungkinan chart kurang jelas atau simbol kurang dikenali AI.\n\n"
+                    f"Teks asli dari AI:\n{raw_text[:800]}"
+                )
+                return
+
+            try:
+                setup = json.loads(raw_text[start:end])
+            except json.JSONDecodeError as jde:
+                tampilkan_peringatan(
+                    "Gagal Parse JSON dari AI",
+                    f"Error: {jde}\n\nTeks asli dari AI:\n{raw_text[:800]}"
+                )
+                return
 
             if setup.get('sinyal') != "VALID":
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
                 return
 
             binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
-            sym = input_symbol.value.strip().replace('/', '').upper()
+
+            manual_sym = input_symbol.value.strip().replace('/', '').replace('-', '').replace(' ', '').upper()
+            ai_sym_raw = str(setup.get('simbol', '') or '').strip().upper()
+            ai_sym = ai_sym_raw.replace('/', '').replace('-', '').replace(' ', '').replace('PERP', '')
+
+            if manual_sym:
+                sym = manual_sym  # kolom manual diisi -> ini menang (override)
+            elif ai_sym:
+                if not ai_sym.endswith('USDT'):
+                    ai_sym += 'USDT'
+                sym = ai_sym  # kolom manual kosong -> pakai hasil baca AI dari screenshot
+            else:
+                tampilkan_peringatan(
+                    "Simbol Tidak Terdeteksi",
+                    "AI tidak berhasil membaca nama pair dari screenshot, dan kolom Simbol dikosongkan. "
+                    "Isi manual kolom Simbol, atau upload screenshot yang judul pair-nya terlihat jelas."
+                )
+                return
+
             margin = float(input_margin.value)
             lev = int(input_lev.value)
             arah = setup['arah']
@@ -424,8 +466,9 @@ async def main(page: ft.Page):
                 return
 
             # Fitur #1: konfirmasi eksplisit sebelum order nyata dikirim.
+            sumber_simbol = "diisi manual" if manual_sym else "dibaca otomatis dari screenshot oleh AI"
             ringkasan = (
-                f"Simbol: {sym}\n"
+                f"Simbol: {sym} ({sumber_simbol})\n"
                 f"Arah: {arah}\n"
                 f"Harga Pasar Saat Ini: {current_price}\n"
                 f"Entry (Stop): {entry_dec}\n"
