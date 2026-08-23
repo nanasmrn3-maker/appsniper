@@ -165,33 +165,14 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Hanya targetkan model vision (multimodal) murni
-        candidate_vision_models = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro"
-        ]
-
-        last_err = None
-        for mod in candidate_vision_models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={clean_key}"
-            try:
-                res = requests.post(url, headers=headers, json=payload, timeout=60, verify=False)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                elif res.status_code in [404, 405]:
-                    continue
-                else:
-                    res.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                last_err = e
-                continue
-
-        if last_err:
-            raise last_err
-        raise Exception("Gagal terhubung ke model vision Gemini. Pastikan koneksi internet stabil.")
+        # Model resmi
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={clean_key}"
+        res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
+        
+        # Tampilkan error asli jika ada penolakan dari server
+        res.raise_for_status()
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
