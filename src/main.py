@@ -165,9 +165,9 @@ async def main(page: ft.Page):
             "Connection": "close"
         }
 
-        # Menggunakan endpoint gemini-3.6-flash sesuai instruksi resmi server Google
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={clean_key}"
-        res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
+        # Menggunakan model stabil resmi terbaru: gemini-3.7-flash
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={clean_key}"
+        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
         
         res.raise_for_status()
         data = res.json()
