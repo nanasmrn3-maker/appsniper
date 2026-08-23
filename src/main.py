@@ -80,6 +80,24 @@ class BinanceFuturesAPI:
 
         return self._request("POST", "/fapi/v1/order", params)
 
+    def create_algo_order(self, symbol, side, order_type, quantity, trigger_price, reduce_only=False):
+        # Sejak 9 Des 2025 Binance memindahkan order kondisional
+        # (STOP_MARKET, TAKE_PROFIT_MARKET, dll) ke endpoint Algo Order.
+        # Perhatikan: parameter harganya bernama "triggerPrice", BUKAN "stopPrice".
+        sym = symbol.replace('/', '').upper()
+        params = {
+            "algoType": "CONDITIONAL",
+            "symbol": sym,
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": f"{quantity:.3f}",
+            "triggerPrice": f"{float(trigger_price):.2f}" if "USDT" in sym else f"{float(trigger_price):.4f}",
+        }
+        if reduce_only:
+            params["reduceOnly"] = "true"
+
+        return self._request("POST", "/fapi/v1/algoOrder", params)
+
 
 # --- APLIKASI FLET UTAMA ---
 async def main(page: ft.Page):
@@ -242,17 +260,17 @@ async def main(page: ft.Page):
 
                 side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
 
-                # 1. Order Utama (STOP_MARKET)
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_u, 'STOP_MARKET', size, stop_price=setup['pemicu_masuk']
+                # 1. Order Utama (STOP_MARKET) - via Algo Order API
+                await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                    sym, side_u, 'STOP_MARKET', size, trigger_price=setup['pemicu_masuk']
                 ))
-                # 2. Order Take Profit (TAKE_PROFIT_MARKET)
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'TAKE_PROFIT_MARKET', size, stop_price=setup['take_profit'], reduce_only=True
+                # 2. Order Take Profit (TAKE_PROFIT_MARKET) - via Algo Order API
+                await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                    sym, side_p, 'TAKE_PROFIT_MARKET', size, trigger_price=setup['take_profit'], reduce_only=True
                 ))
-                # 3. Order Stop Loss (STOP_MARKET)
-                await loop.run_in_executor(None, lambda: binance.create_order(
-                    sym, side_p, 'STOP_MARKET', size, stop_price=setup['stop_loss'], reduce_only=True
+                # 3. Order Stop Loss (STOP_MARKET) - via Algo Order API
+                await loop.run_in_executor(None, lambda: binance.create_algo_order(
+                    sym, side_p, 'STOP_MARKET', size, trigger_price=setup['stop_loss'], reduce_only=True
                 ))
 
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
