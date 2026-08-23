@@ -36,18 +36,18 @@ class BinanceFuturesAPI:
         if params is None:
             params = {}
         params["timestamp"] = int(time.time() * 1000)
-        
+
         query_string = urlencode(params)
         signature = self._generate_signature(query_string)
         url = f"{self.base_url}{endpoint}?{query_string}&signature={signature}"
-        
+
         if method.upper() == "GET":
             res = requests.get(url, headers=self._headers(), timeout=15, verify=False)
         elif method.upper() == "POST":
             res = requests.post(url, headers=self._headers(), timeout=15, verify=False)
         else:
             res = requests.request(method.upper(), url, headers=self._headers(), timeout=15, verify=False)
-            
+
         res.raise_for_status()
         return res.json()
 
@@ -74,10 +74,10 @@ class BinanceFuturesAPI:
         }
         if stop_price is not None:
             params["stopPrice"] = f"{float(stop_price):.2f}" if "USDT" in symbol else f"{float(stop_price):.4f}"
-            
+
         if reduce_only:
             params["reduceOnly"] = "true"
-            
+
         return self._request("POST", "/fapi/v1/order", params)
 
 
@@ -109,7 +109,7 @@ async def main(page: ft.Page):
     input_margin = ft.TextField(label="Margin (USDT)", value=saved_margin, on_blur=save_data)
     input_lev = ft.TextField(label="Leverage", value=saved_leverage, on_blur=save_data)
     input_symbol = ft.TextField(label="Simbol (Contoh: BTCUSDT atau CAP/USDT)", value="BTCUSDT")
-    
+
     path_foto = ft.Text("Belum ada foto dipilih")
     layar_log = ft.Text("Status: Standby", color=ft.Colors.YELLOW)
 
@@ -122,7 +122,7 @@ async def main(page: ft.Page):
     def tampilkan_peringatan(judul, pesan):
         layar_log.value = f"Status: {judul}\n\nDetail: {pesan}"
         layar_log.color = ft.Colors.RED
-        
+
         def tutup_dialog(e):
             dialog.open = False
             page.update()
@@ -138,7 +138,7 @@ async def main(page: ft.Page):
 
     def call_claude_api(api_key, image_path, prompt):
         clean_key = api_key.strip()
-        
+
         with open(image_path, "rb") as image_file:
             raw_bytes = image_file.read()
             encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
@@ -152,27 +152,27 @@ async def main(page: ft.Page):
             "content-type": "application/json"
         }
 
-payload = {
-    "model": "claude-sonnet-5",   # sebelumnya: "claude-3-5-sonnet-20241022"
-    "max_tokens": 1000,
-    "messages": [{
-        "role": "user",
-        "content": [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": encoded_image
-                }
-            },
-            {
-                "type": "text",
-                "text": prompt
-            }
-        ]
-    }]
-}
+        payload = {
+            "model": "claude-sonnet-5",
+            "max_tokens": 1000,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": encoded_image
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }]
+        }
 
         url = "https://api.anthropic.com/v1/messages"
         res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
@@ -194,7 +194,7 @@ payload = {
             Anda adalah sistem penembak jitu trading crypto. Analisis chart/gambar ini dengan sangat teliti.
             Perhatikan struktur harga terbaru yang tertera di chart.
             Tentukan setup Stop Market (Entri, Take Profit, dan Stop Loss) berdasarkan analisis teknikal chart tersebut.
-            
+
             Keluarkan HANYA format JSON murni tanpa kata-kata pembuka/penutup. Format wajib:
             {
                 "sinyal": "VALID",
@@ -205,12 +205,12 @@ payload = {
             }
             Jika tidak ada momentum atau chart kurang jelas untuk dianalisis, ubah status "sinyal" menjadi "TIDAK VALID".
             """
-            
+
             loop = asyncio.get_running_loop()
             raw_response = await loop.run_in_executor(
                 None, lambda: call_claude_api(api_ai.value, path_foto.value, prompt)
             )
-            
+
             raw_text = raw_response.strip().replace('```json', '').replace('```', '')
             start = raw_text.find('{')
             end = raw_text.rfind('}') + 1
@@ -228,9 +228,9 @@ payload = {
                 await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
                 price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
                 size = (margin * lev) / price
-                
+
                 side_u, side_p = ('BUY', 'SELL') if setup['arah'] == 'BUY' else ('SELL', 'BUY')
-                
+
                 # 1. Order Utama (STOP_MARKET)
                 await loop.run_in_executor(None, lambda: binance.create_order(
                     sym, side_u, 'STOP_MARKET', size, stop_price=setup['pemicu_masuk']
@@ -243,13 +243,13 @@ payload = {
                 await loop.run_in_executor(None, lambda: binance.create_order(
                     sym, side_p, 'STOP_MARKET', size, stop_price=setup['stop_loss'], reduce_only=True
                 ))
-                
+
                 layar_log.value = "Status: TRIPLE SHOT BERHASIL!"
                 layar_log.color = ft.Colors.GREEN
                 page.update()
             else:
                 tampilkan_peringatan("Sinyal Tidak Valid", "AI menilai chart saat ini kurang jelas atau tidak ada momentum yang aman untuk masuk pasar.")
-                
+
         except requests.exceptions.HTTPError as err:
             err_msg = err.response.text if hasattr(err, 'response') and err.response is not None else str(err)
             tampilkan_peringatan("Gagal REST API", f"{err_msg}")
