@@ -178,7 +178,18 @@ async def main(page: ft.Page):
         res = requests.post(url, headers=headers, json=payload, timeout=90, verify=False)
         res.raise_for_status()
         data = res.json()
-        return data["content"][0]["text"]
+
+        content_blocks = data.get("content", [])
+        if not content_blocks:
+            raise Exception(f"Respons Claude tidak berisi content. Raw: {json.dumps(data)[:500]}")
+
+        # Cari blok bertipe "text" (bisa ada beberapa blok, mis. jika ada thinking block)
+        for block in content_blocks:
+            if block.get("type") == "text" and "text" in block:
+                return block["text"]
+
+        # Kalau tidak ada blok "text" sama sekali, tampilkan raw response untuk diagnosis
+        raise Exception(f"Tidak ada blok teks pada respons Claude. Raw: {json.dumps(data)[:500]}")
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
