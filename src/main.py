@@ -146,38 +146,7 @@ async def main(page: ft.Page):
         ext = os.path.splitext(image_path)[1].lower()
         mime_type = "image/png" if ext == ".png" else "image/jpeg"
 
-        headers = {
-            "Content-Type": "application/json",
-            "Connection": "close"
-        }
-
-        # 1. Coba Endpoint Modern Interactions API (Google GenAI SDK Scheme)
-        interactions_url = f"https://generativelanguage.googleapis.com/v1beta/interactions?key={clean_key}"
-        interactions_payload = {
-            "model": "gemini-3.7-flash",
-            "input": [
-                {"text": prompt},
-                {
-                    "inline_data": {
-                        "mime_type": mime_type,
-                        "data": encoded_image
-                    }
-                }
-            ]
-        }
-
-        res = requests.post(interactions_url, headers=headers, json=interactions_payload, timeout=120, verify=False)
-        
-        if res.status_code == 200:
-            data = res.json()
-            if "output_text" in data:
-                return data["output_text"]
-            if "outputs" in data and len(data["outputs"]) > 0:
-                return data["outputs"][0].get("text", "")
-
-        # 2. Fallback: GenerateContent Standar v1beta
-        legacy_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={clean_key}"
-        legacy_payload = {
+        payload = {
             "contents": [{
                 "parts": [
                     {"text": prompt},
@@ -190,11 +159,19 @@ async def main(page: ft.Page):
                 ]
             }]
         }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Connection": "close"
+        }
 
-        res_legacy = requests.post(legacy_url, headers=headers, json=legacy_payload, timeout=120, verify=False)
-        res_legacy.raise_for_status()
-        data_legacy = res_legacy.json()
-        return data_legacy["candidates"][0]["content"]["parts"][0]["text"]
+        # Menggunakan alias resmi production-ready Google (gemini-flash-latest) untuk menghindari server sibuk (503)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={clean_key}"
+        res = requests.post(url, headers=headers, json=payload, timeout=120, verify=False)
+        
+        res.raise_for_status()
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     async def luncurkan_execution():
         if not path_foto.value or "Belum ada" in path_foto.value:
