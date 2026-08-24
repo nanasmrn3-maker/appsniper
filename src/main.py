@@ -173,6 +173,49 @@ class BinanceFuturesAPI:
         sym = symbol.replace('/', '').upper()
         return self._request("DELETE", "/fapi/v1/algoOpenOrders", {"symbol": sym})
 
+    def get_position_amt(self, symbol):
+        sym = symbol.replace('/', '').upper()
+        result = self._request("GET", "/fapi/v3/positionRisk", {"symbol": sym})
+        if isinstance(result, list):
+            return sum(float(p.get("positionAmt", 0)) for p in result)
+        return 0.0
+
+    def get_open_algo_orders(self, symbol):
+        sym = symbol.replace('/', '').upper()
+        result = self._request("GET", "/fapi/v1/algoOpenOrders", {"symbol": sym})
+        if isinstance(result, dict):
+            return result.get("orders", result.get("algoOrders", []))
+        return result
+
+    def cleanup_orphan_orders(self, symbol):
+        """Binance TIDAK menghubungkan TP dan SL (dikonfirmasi di changelog resmi:
+        conditional order bergantung pada POSISI, bukan pada order lawannya). Jadi kalau
+        salah satu (TP atau SL) kena duluan dan menutup posisi, yang satu lagi TIDAK
+        otomatis terbatalkan - dia 'tertinggal' menggantung selamanya sampai dibatalkan manual.
+
+        Deteksi: kalau posisi sudah flat (0) DAN tidak ada order entry (non-reduceOnly)
+        yang masih menunggu, TAPI masih ada order reduceOnly (TP/SL) terbuka -> itu pasti
+        order yatim dari posisi yang sudah ditutup duluan. Aman dibatalkan.
+        Kalau entry masih ada & pending, itu kondisi normal menunggu trigger - tidak disentuh."""
+        sym = symbol.replace('/', '').upper()
+        open_orders = self.get_open_algo_orders(sym)
+        if not open_orders:
+            return 0, "Tidak ada order terbuka untuk simbol ini."
+
+        pos_amt = self.get_position_amt(sym)
+        if pos_amt != 0:
+            return 0, "Posisi masih terbuka - order yang ada masih relevan, tidak disentuh."
+
+        entry_masih_menunggu = any(not o.get("reduceOnly", False) for o in open_orders)
+        if entry_masih_menunggu:
+            return 0, "Masih menunggu order entry ter-trigger - kondisi normal, tidak disentuh."
+
+        sisa = [o for o in open_orders if o.get("reduceOnly", False)]
+        if sisa:
+            self.cancel_all_algo_orders(sym)
+            return len(sisa), f"{len(sisa)} order TP/SL yatim (posisi sudah flat, entry sudah tidak ada) dibatalkan."
+        return 0, "Tidak ada yang perlu dibersihkan."
+
     def get_income_history(self, start_time_ms, income_type="REALIZED_PNL"):
         params = {
             "incomeType": income_type,
@@ -307,6 +350,7 @@ async def main(page: ft.Page):
         log_list.update()
 
     launch_button = ft.Button("LUNCURKAN OTOMATIS (FOTO)", bgcolor=ft.Colors.RED_800, color=ft.Colors.WHITE)
+    cleanup_button = ft.Button("BERSIHKAN ORDER SISA (SIMBOL DI ATAS)", bgcolor=ft.Colors.ORANGE_800, color=ft.Colors.WHITE)
     switch_auto = ft.Switch(label="MODE OTOMATIS BERKALA — TANPA konfirmasi manual", value=False)
     auto_status_text = ft.Text("Mode otomatis: NONAKTIF", color=ft.Colors.GREY)
 
@@ -615,6 +659,37 @@ async def main(page: ft.Page):
 
     launch_button.on_click = on_luncurkan_click
 
+    async def bersihkan_order_sisa_click():
+        cleanup_button.disabled = True
+        cleanup_button.text = "MEMERIKSA..."
+        page.update()
+        try:
+            sym = input_symbol.value.strip().replace('/', '').replace('-', '').replace(' ', '').upper()
+            if not sym:
+                tampilkan_peringatan("Simbol Kosong", "Isi kolom Simbol dulu untuk cek order sisa.")
+                return
+            if not sym.endswith("USDT"):
+                sym += "USDT"
+            binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
+            loop = asyncio.get_running_loop()
+            jumlah, pesan = await loop.run_in_executor(None, lambda: binance.cleanup_orphan_orders(sym))
+            catat_log(f"{sym}: [Cek Manual] {pesan}")
+            if jumlah > 0:
+                tampilkan_peringatan("Order Sisa Dibersihkan", f"{sym}: {pesan}")
+            else:
+                tampilkan_peringatan("Hasil Pengecekan", f"{sym}: {pesan}")
+        except Exception as ex:
+            tampilkan_peringatan("Gagal Cek Order Sisa", str(ex))
+        finally:
+            cleanup_button.disabled = False
+            cleanup_button.text = "BERSIHKAN ORDER SISA (SIMBOL DI ATAS)"
+            page.update()
+
+    def on_cleanup_click(e):
+        asyncio.create_task(bersihkan_order_sisa_click())
+
+    cleanup_button.on_click = on_cleanup_click
+
     # ---------- MODE OTOMATIS BERKALA (tanpa screenshot, tanpa konfirmasi) ----------
 
     async def jalankan_siklus_otomatis():
@@ -628,6 +703,15 @@ async def main(page: ft.Page):
         interval_candle = (input_candle_interval.value or "15m").strip()
         binance = BinanceFuturesAPI(api_bin.value, api_sec.value)
         loop = asyncio.get_running_loop()
+
+        # Bersihkan dulu order TP/SL yatim (kalau ada) dari siklus sebelumnya,
+        # sebelum menganalisis dan mempertimbangkan posisi baru.
+        try:
+            jumlah, pesan = await loop.run_in_executor(None, lambda: binance.cleanup_orphan_orders(sym))
+            if jumlah > 0:
+                catat_log(f"{sym}: [Housekeeping] {pesan}")
+        except Exception as e:
+            catat_log(f"{sym}: Gagal cek order sisa (lanjut tetap) - {e}")
 
         try:
             klines = await loop.run_in_executor(None, lambda: binance.get_klines(sym, interval_candle, 100))
@@ -735,6 +819,9 @@ Jika tidak ada momentum/setup yang cukup jelas, set "sinyal" menjadi "TIDAK VALI
             path_foto,
             launch_button,
             layar_log,
+            ft.Divider(),
+            ft.Text("Perawatan Order (cek/bersihkan order TP/SL yang tertinggal)", size=14, weight="bold", color=ft.Colors.ORANGE),
+            cleanup_button,
             ft.Divider(),
             ft.Text("Mode Otomatis Berkala (data candlestick asli, TANPA konfirmasi)", size=14, weight="bold", color=ft.Colors.RED),
             input_candle_interval,
