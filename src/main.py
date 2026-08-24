@@ -34,6 +34,15 @@ def round_step(value: Decimal, step_str: str, rounding=ROUND_DOWN) -> Decimal:
     return result.quantize(quant, rounding=rounding)
 
 
+def dec_to_str(d: Decimal) -> str:
+    """Konversi Decimal ke string untuk dikirim ke Binance. WAJIB pakai ini,
+    BUKAN str(d) langsung - karena str(Decimal) Python otomatis berpindah ke
+    notasi ilmiah (mis. '1.2E-7') untuk angka sangat kecil, seperti harga
+    token receh (SATS, SPELL, DOGS, dll yang harganya < 0.0001). Binance
+    menolak/salah-parsing notasi ilmiah, jadi harus dipaksa fixed-point."""
+    return format(d, 'f')
+
+
 # --- BINANCE FUTURES REST CLIENT ---
 class BinanceFuturesAPI:
     def __init__(self, api_key, secret_key):
@@ -181,11 +190,12 @@ class BinanceFuturesAPI:
         return 0.0
 
     def get_open_algo_orders(self, symbol):
+        # PENTING: endpoint GET ini urutannya "openAlgoOrders" (bukan "algoOpenOrders"
+        # seperti endpoint DELETE cancel_all_algo_orders di bawah - dua nama yang mirip
+        # tapi urutan katanya kebalik). Salah tulis di sini bikin cleanup gagal diam-diam.
         sym = symbol.replace('/', '').upper()
-        result = self._request("GET", "/fapi/v1/algoOpenOrders", {"symbol": sym})
-        if isinstance(result, dict):
-            return result.get("orders", result.get("algoOrders", []))
-        return result
+        result = self._request("GET", "/fapi/v1/openAlgoOrders", {"symbol": sym})
+        return result if isinstance(result, list) else []
 
     def cleanup_orphan_orders(self, symbol):
         """Binance TIDAK menghubungkan TP dan SL (dikonfirmasi di changelog resmi:
@@ -437,6 +447,29 @@ async def main(page: ft.Page):
         lev = int(input_lev.value)
         arah = setup.get('arah')
 
+        # Cegah PENUMPUKAN order: kalau sudah ada posisi atau order aktif untuk
+        # simbol ini, jangan buka set entry/TP/SL baru di atasnya. Ini akar
+        # masalah "order menumpuk jadi 4/5" yang terjadi sebelumnya.
+        _log("Mengecek posisi/order aktif yang sudah ada...")
+        try:
+            pos_amt_cek = await loop.run_in_executor(None, lambda: binance.get_position_amt(sym))
+            order_aktif_cek = await loop.run_in_executor(None, lambda: binance.get_open_algo_orders(sym))
+        except Exception as e:
+            _log(f"Gagal cek posisi/order aktif - {e}", is_error=True)
+            if not is_auto:
+                tampilkan_peringatan("Gagal Cek Status Posisi", str(e))
+            return "error"
+
+        if pos_amt_cek != 0 or order_aktif_cek:
+            pesan = (
+                f"Sudah ada posisi (amt={pos_amt_cek}) dan/atau {len(order_aktif_cek)} order terbuka "
+                f"untuk {sym}. Tidak membuka posisi baru di atasnya - selesaikan/tutup dulu yang ada."
+            )
+            _log(pesan)
+            if not is_auto:
+                tampilkan_peringatan("Sudah Ada Posisi/Order Aktif", pesan)
+            return "sudah_aktif"
+
         _log("Mengambil data pasar & aturan presisi...")
         try:
             current_price = await loop.run_in_executor(None, lambda: binance.get_ticker_price(sym))
@@ -519,7 +552,7 @@ async def main(page: ft.Page):
 
         ringkasan = (
             f"Simbol: {sym}\nArah: {arah}\nHarga Pasar: {current_price}\n"
-            f"Entry: {entry_dec}\nTP: {tp_dec}\nSL: {sl_dec}\nQuantity: {size_dec}\n"
+            f"Entry: {dec_to_str(entry_dec)}\nTP: {dec_to_str(tp_dec)}\nSL: {dec_to_str(sl_dec)}\nQuantity: {dec_to_str(size_dec)}\n"
             f"Notional: {notional:.2f} USDT\nMargin: {margin} | Leverage: {lev}x\n"
             f"stepSize: {filters['qty_step']} | tickSize: {filters['price_tick']}\n"
             f"PnL 24 Jam: {total_pnl_24h:.2f} USDT\n\n"
@@ -544,16 +577,16 @@ async def main(page: ft.Page):
         try:
             await loop.run_in_executor(None, lambda: binance.set_leverage(sym, lev))
             side_u, side_p = ('BUY', 'SELL') if arah == 'BUY' else ('SELL', 'BUY')
-            qty_str = str(size_dec)
+            qty_str = dec_to_str(size_dec)
 
             await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                sym, side_u, 'STOP_MARKET', qty_str, trigger_price_str=str(entry_dec)
+                sym, side_u, 'STOP_MARKET', qty_str, trigger_price_str=dec_to_str(entry_dec)
             ))
             await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                sym, side_p, 'TAKE_PROFIT_MARKET', qty_str, trigger_price_str=str(tp_dec), reduce_only=True
+                sym, side_p, 'TAKE_PROFIT_MARKET', qty_str, trigger_price_str=dec_to_str(tp_dec), reduce_only=True
             ))
             await loop.run_in_executor(None, lambda: binance.create_algo_order(
-                sym, side_p, 'STOP_MARKET', qty_str, trigger_price_str=str(sl_dec), reduce_only=True
+                sym, side_p, 'STOP_MARKET', qty_str, trigger_price_str=dec_to_str(sl_dec), reduce_only=True
             ))
         except Exception as order_err:
             try:
