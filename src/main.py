@@ -34,6 +34,9 @@ def round_step(value: Decimal, step_str: str, rounding=ROUND_DOWN) -> Decimal:
     return result.quantize(quant, rounding=rounding)
 
 
+_exchange_info_cache = {"data": None, "fetched_at": 0}
+
+
 def dec_to_str(d: Decimal) -> str:
     """Konversi Decimal ke string untuk dikirim ke Binance. WAJIB pakai ini,
     BUKAN str(d) langsung - karena str(Decimal) Python otomatis berpindah ke
@@ -110,16 +113,27 @@ class BinanceFuturesAPI:
         return res.json()
 
     def get_exchange_info(self, symbol):
-        # Endpoint publik, tidak perlu signature.
+        """PENTING: endpoint /fapi/v1/exchangeInfo TIDAK punya parameter query
+        sama sekali (dikonfirmasi di dokumentasi resmi - tidak ada bagian "Query
+        Parameters" untuk endpoint ini). Ia SELALU mengembalikan daftar SEMUA
+        simbol Binance Futures, tidak peduli apa yang dikirim di URL. Jadi kita
+        WAJIB mencari simbol yang tepat sendiri di dalam daftar itu - mengambil
+        elemen pertama begitu saja akan mengembalikan data simbol yang salah,
+        yang menjelaskan berbagai error presisi aneh sebelumnya (ZRO, SOL, HOT)."""
         sym = symbol.replace('/', '').upper()
-        url = f"{self.base_url}/fapi/v1/exchangeInfo?symbol={sym}"
-        res = requests.get(url, timeout=15, verify=False)
-        res.raise_for_status()
-        data = res.json()
-        symbols = data.get("symbols", [])
-        if not symbols:
-            raise Exception(f"Simbol {sym} tidak ditemukan di Binance Futures. Cek ejaan simbolnya.")
-        return symbols[0]
+
+        now = time.time()
+        if _exchange_info_cache["data"] is None or (now - _exchange_info_cache["fetched_at"]) > 600:
+            url = f"{self.base_url}/fapi/v1/exchangeInfo"
+            res = requests.get(url, timeout=15, verify=False)
+            res.raise_for_status()
+            _exchange_info_cache["data"] = res.json()
+            _exchange_info_cache["fetched_at"] = now
+
+        for s in _exchange_info_cache["data"].get("symbols", []):
+            if s.get("symbol") == sym:
+                return s
+        raise Exception(f"Simbol {sym} tidak ditemukan di Binance Futures. Cek ejaan simbolnya.")
 
     def get_symbol_filters(self, symbol):
         """Ambil stepSize (kelipatan quantity), tickSize (kelipatan harga),
