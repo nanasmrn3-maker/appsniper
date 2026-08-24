@@ -184,12 +184,20 @@ class BinanceFuturesAPI:
 
 def _extract_claude_text(data):
     content_blocks = data.get("content", [])
-    if not content_blocks:
-        raise Exception(f"Respons Claude tidak berisi content. Raw: {json.dumps(data)[:500]}")
     for block in content_blocks:
         if block.get("type") == "text" and "text" in block:
             return block["text"]
-    raise Exception(f"Tidak ada blok teks pada respons Claude. Raw: {json.dumps(data)[:500]}")
+
+    # Tidak ada blok teks. Cek apakah ini karena budget token habis duluan
+    # oleh proses "thinking" sebelum sempat menghasilkan jawaban (kasus umum).
+    stop_reason = data.get("stop_reason", "")
+    if stop_reason == "max_tokens":
+        raise Exception(
+            "Respons Claude terpotong karena max_tokens habis sebelum menghasilkan teks "
+            "(kemungkinan besar terpakai untuk 'thinking'). Naikkan nilai max_tokens di kode. "
+            f"Raw: {json.dumps(data)[:500]}"
+        )
+    raise Exception(f"Tidak ada blok teks pada respons Claude (stop_reason={stop_reason}). Raw: {json.dumps(data)[:500]}")
 
 
 def call_claude_vision_api(api_key, image_path, prompt):
@@ -206,7 +214,7 @@ def call_claude_vision_api(api_key, image_path, prompt):
     }
     payload = {
         "model": "claude-sonnet-5",
-        "max_tokens": 1000,
+        "max_tokens": 4096,
         "messages": [{
             "role": "user",
             "content": [
@@ -231,7 +239,7 @@ def call_claude_text_api(api_key, prompt):
     }
     payload = {
         "model": "claude-sonnet-5",
-        "max_tokens": 1000,
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}]
     }
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=90, verify=False)
