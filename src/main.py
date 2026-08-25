@@ -826,15 +826,34 @@ Jika tidak ada momentum/setup yang cukup jelas, set "sinyal" menjadi "TIDAK VALI
     await load3()
     await load4()
 
-    tabs_otomatis = ft.Tabs(
-        selected_index=0,
-        tabs=[
-            ft.Tab(text="Koin 1", content=panel1),
-            ft.Tab(text="Koin 2", content=panel2),
-            ft.Tab(text="Koin 3", content=panel3),
-            ft.Tab(text="Koin 4", content=panel4),
-        ],
-    )
+    # Tombol pemilih panel manual (bukan ft.Tabs) - supaya tidak bergantung pada
+    # API Tabs yang ternyata beda-beda antar versi Flet (text vs tab_content vs label).
+    semua_panel = [panel1, panel2, panel3, panel4]
+    tab_content_container = ft.Container(content=semua_panel[0])
+    tab_buttons = []
+
+    def buat_switch_handler(idx):
+        def handler(e):
+            tab_content_container.content = semua_panel[idx]
+            for i, btn in enumerate(tab_buttons):
+                btn.bgcolor = ft.Colors.BLUE_700 if i == idx else ft.Colors.GREY_800
+                btn.update()
+            tab_content_container.update()
+        return handler
+
+    for i in range(4):
+        btn = ft.Button(
+            f"Koin {i + 1}",
+            bgcolor=ft.Colors.BLUE_700 if i == 0 else ft.Colors.GREY_800,
+            color=ft.Colors.WHITE,
+        )
+        btn.on_click = buat_switch_handler(i)
+        tab_buttons.append(btn)
+
+    tabs_otomatis = ft.Column([
+        ft.Row(tab_buttons, wrap=True),
+        tab_content_container,
+    ])
 
     page.add(
         ft.Column([
